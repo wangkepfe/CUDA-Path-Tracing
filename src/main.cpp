@@ -20,7 +20,7 @@
 #include <cuda_gl_interop.h>
 
 #ifndef M_PI
-#define M_PI 3.14156265
+#define M_PI 3.1415926535897932384626422832795028841971f
 #endif
 
 const std::string scenefile = "data/monkey.obj"; 

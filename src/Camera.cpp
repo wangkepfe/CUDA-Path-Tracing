@@ -8,9 +8,9 @@ InteractiveCamera::InteractiveCamera()
 	centerPosition = Vec3f(0, 0, 0);
 	yaw = 0;
 	pitch = 0.3;
-	radius = 4;
+	radius = 5;
 	apertureRadius = 0.04; 
-	focalDistance = 4.0f;
+	focalDistance = 5.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);  
 	fov = Vec2f(40, 40);

@@ -11,9 +11,12 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include "cutil_math.h"  // required for float3
+#include "reflection.cuh"
 
 #define STACK_SIZE  64  // Size of the traversal stack in local memory.
+#ifndef M_PI
 #define M_PI 3.1415926535897932384626422832795028841971f
+#endif
 #define TWO_PI 6.2831853071795864769252867665590057683943f
 #define DYNAMIC_FETCH_THRESHOLD 20          // If fewer than this active, fetch new rays
 #define samps 1
@@ -67,14 +70,14 @@ __constant__ Sphere spheres[] = {
 	// sun
 	//{ 10000, { 50.0f, 40.8f, -1060 }, { 0.3, 0.3, 0.3 }, { 0.175f, 0.175f, 0.25f }, DIFF }, // sky   0.003, 0.003, 0.003	
 	//{ 4.5, { 0.0f, 12.5, 0 }, { 6, 4, 1 }, { .6f, .6f, 0.6f }, DIFF },  /// lightsource	
-	{ 10000.02, { 50.0f, -10001.35, 0 }, { 0.0, 0.0, 0 }, { 0.3f, 0.3f, 0.3f }, DIFF }, // ground  300/-301.0
+	//{ 10000.0, { 0, - 10000.0f - 1.2f, 0 }, { 0.0, 0.0, 0 }, { 0.3f, 0.3f, 0.3f }, DIFF }, // ground  300/-301.0
 	//{ 10000, { 50.0f, -10000.1, 0 }, { 0, 0, 0 }, { 0.3f, 0.3f, 0.3f }, DIFF }, // double shell to prevent light leaking
 	//{ 110000, { 50.0f, -110048.5, 0 }, { 3.6, 2.0, 0.2 }, { 0.f, 0.f, 0.f }, DIFF },  // horizon brightener
 	
 	//{ 0.5, { 30.0f, 180.5, 42 }, { 0, 0, 0 }, { .6f, .6f, 0.6f }, DIFF },  // small sphere 1  
 	//{ 0.8, { 2.0f, 0.f, 0 }, { 0.0, 0.0, 0.0 }, { 0.8f, 0.8f, 0.8f }, SPEC },  // small sphere 2
 	//{ 0.8, { -3.0f, 0.f, 0 }, { 0.0, 0.0, 0.0 }, { 0.0f, 0.0f, 0.2f }, COAT },  // small sphere 2
-	{ 2.5, { -6.0f, 0.5f, 0.0f }, { 0.0, 0.0, 0.0 }, { 0.9f, 0.9f, 0.9f }, SPEC },  // small sphere 2
+	{ 1.0f, { -6.0f, 1.0f, 0.0f }, { 0.0, 0.0, 0.0 }, { 0.9f, 0.9f, 0.9f }, SPEC },  // small sphere 2
 	//{ 0.6, { -10.0f, -2.f, 1.0f }, { 0.0, 0.0, 0.0 }, { 0.8f, 0.8f, 0.8f }, DIFF },  // small sphere 2
 	//{ 0.8, { -1.0f, -0.7f, 4.0f }, { 0.0, 0.0, 0.0 }, { 0.8f, 0.8f, 0.8f }, REFR },  // small sphere 2
 	//{ 9.4, { 9.0f, 0.f, -9.0f }, { 0.0, 0.0, 0.0 }, { 0.8f, 0.8f, 0.f }, DIFF },  // small sphere 2
@@ -844,19 +847,21 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 		// diffuse material, based on smallpt by Kevin Beason 
 		if (refltype == DIFF){
 
-			// pick two random numbers
-			float phi = 2 * M_PI * curand_uniform(randstate);
-			float r2 = curand_uniform(randstate);
-			float r2s = sqrtf(r2);
+			// // pick two random numbers
+			// float phi = 2 * M_PI * curand_uniform(randstate);
+			// float r2 = curand_uniform(randstate);
+			// float r2s = sqrtf(r2);
 
-			// compute orthonormal coordinate frame uvw with hitpoint as origin 
-			Vec3f w = nl; w.normalize();
-			Vec3f u = cross((fabs(w.x) > .1 ? Vec3f(0, 1, 0) : Vec3f(1, 0, 0)), w); u.normalize();
-			Vec3f v = cross(w, u);
+			// // compute orthonormal coordinate frame uvw with hitpoint as origin 
+			// Vec3f w = nl; w.normalize();
+			// Vec3f u = cross((fabs(w.x) > .1 ? Vec3f(0, 1, 0) : Vec3f(1, 0, 0)), w); u.normalize();
+			// Vec3f v = cross(w, u);
 
-			// compute cosine weighted random ray direction on hemisphere 
-			nextdir = u*cosf(phi)*r2s + v*sinf(phi)*r2s + w*sqrtf(1 - r2);
-			nextdir.normalize();
+			// // compute cosine weighted random ray direction on hemisphere 
+			// nextdir = u*cosf(phi)*r2s + v*sinf(phi)*r2s + w*sqrtf(1 - r2);
+			// nextdir.normalize();
+
+			lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
 
 			// offset origin next path segment to prevent self intersection
 			hitpoint += nl * 0.001f; // scene size dependent

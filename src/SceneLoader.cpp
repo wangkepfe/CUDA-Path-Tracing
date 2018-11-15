@@ -634,8 +634,8 @@ float processgeo(){
 	for (unsigned i = 0; i<verticesNo; i++) {
 		vertices[i] -= origCenter;
 		//vertices[i].y += origCenter.y;
-		//vertices[i] *= (MaxCoordAfterRescale / maxi);
-		vertices[i] *= 0.1; // 0.25
+		vertices[i] *= (MaxCoordAfterRescale / maxi);
+		//vertices[i] *= 0.1; // 0.25
 	}
 
 	return MaxCoordAfterRescale;
