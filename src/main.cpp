@@ -23,7 +23,7 @@
 #define M_PI 3.1415926535897932384626422832795028841971f
 #endif
 
-const std::string scenefile = "data/monkey.obj"; 
+const std::string scenefile = "data/dragon.obj"; 
 const std::string HDRmapname = "data/pisa.hdr";
 
 Vec4i* cpuNodePtr = NULL;
