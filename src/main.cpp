@@ -112,8 +112,8 @@ void disp(void)
 	cudaThreadSynchronize();
 	cudaGLUnmapBufferObject(vbo);
 	glFlush();
-  glFinish();
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glFinish();
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
 	glVertexPointer(2, GL_FLOAT, 12, 0);
 	glColorPointer(4, GL_UNSIGNED_BYTE, 12, (GLvoid*)8);
 
