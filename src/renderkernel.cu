@@ -1,59 +1,76 @@
-// BVH traversal kernels based on "Understanding the 
+/******************************************
+ * 
+ *          CUDA GPU path tracing
+ * 
+ * 
+ * 
+ * 
+ * ****************************************/
 
+
+// cuda
 #include <cuda.h>
 #include <math_functions.h>
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <device_launch_parameters.h>
 #include <cuda_runtime.h>
-#include "CudaRenderKernel.h"
-#include "stdio.h"
 #include <curand.h>
 #include <curand_kernel.h>
+
+// render kernal header
+#include "CudaRenderKernel.h"
+
+// c
+#include "stdio.h"
+
+// utils
 #include "cutil_math.h"  // required for float3
+
+// material modeling
 #include "reflection.cuh"
 
-#define STACK_SIZE  64  // Size of the traversal stack in local memory.
+// ******************* macro define ********************
+
+// constants
 #ifndef M_PI
 #define M_PI 3.1415926535897932384626422832795028841971f
 #endif
-//#define TWO_PI 6.2831853071795864769252867665590057683943f
-#define DYNAMIC_FETCH_THRESHOLD 20          // If fewer than this active, fetch new rays
-#define samps 1
 #define F32_MIN          (1.175494351e-38f)
 #define F32_MAX          (3.402823466e+38f)
 
+// hdr setting
 #define HDRwidth 4096
 #define HDRheight 2048
-#define HDR
-#define EntrypointSentinel 0x76543210
-#define MaxBlockHeight 6
 
+// texture setting
+#define TextureWidth 256
+#define TextureHeight 256
+
+// bvh stack
+#define STACK_SIZE  64  // Size of the traversal stack in local memory.
+#define EntrypointSentinel 0x76543210
+
+// limits
 #define RAY_MIN 1e-5f
 #define RAY_MAX 1e20f
 #define M_EPSILON 1e-5f
-
 #define SCENE_MAX 1e5f
 
+// sampling settings
+#define NUM_SAMPLE 1
 #define USE_RUSSIAN true
 #define RUSSIAN_P 0.7
-#define LIGHT_BOUNCE 20
+#define LIGHT_BOUNCE 100
 
+// ******************* structures ********************
+
+// enum
 enum Refl_t { MAT_DIFF, MAT_MIRROR, MAT_GLASS };  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
 enum Medium_t {MEDIUM_NO = -1, MEDIUM_TEST = 0};
 
-// CUDA textures containing scene data
-texture<float4, 1, cudaReadModeElementType> bvhNodesTexture;
-texture<float4, 1, cudaReadModeElementType> triWoopTexture;
-texture<float4, 1, cudaReadModeElementType> triNormalsTexture;
-texture<int, 1, cudaReadModeElementType> triIndicesTexture;
-texture<float4, 1, cudaReadModeElementType> HDRtexture;
-
-__device__ inline Vec3f absmax3f(const Vec3f& v1, const Vec3f& v2) {
-	return Vec3f(v1.x*v1.x > v2.x*v2.x ? v1.x : v2.x, v1.y*v1.y > v2.y*v2.y ? v1.y : v2.y, v1.z*v1.z > v2.z*v2.z ? v1.z : v2.z);
-}
-
+// geometry, material
 struct Ray {
 	Vec3f orig;	// ray origin
 	Vec3f dir;		// ray direction	
@@ -92,18 +109,23 @@ struct MediumSS {
 	__device__ Vec3f getSigmaT() { return sigmaA + sigmaS; }
 };
 
+// ******************* global variables ********************
 
-//  RAY BOX INTERSECTION ROUTINES
+// bvh
+texture<float4, 1, cudaReadModeElementType> bvhNodesTexture;
+texture<float4, 1, cudaReadModeElementType> triWoopTexture;
+texture<float4, 1, cudaReadModeElementType> triNormalsTexture;
+texture<int, 1, cudaReadModeElementType> triIndicesTexture;
 
-// Experimentally determined best mix of float/int/video minmax instructions for Kepler.
+// hdr
+texture<float4, 1, cudaReadModeElementType> HDRtexture;
 
-// float c0min = spanBeginKepler2(c0lox, c0hix, c0loy, c0hiy, c0loz, c0hiz, tmin); // Tesla does max4(min, min, min, tmin)
-// float c0max = spanEndKepler2(c0lox, c0hix, c0loy, c0hiy, c0loz, c0hiz, hitT); // Tesla does min4(max, max, max, tmax)
+// color texture
+texture<uchar4, cudaTextureType2D, cudaReadModeElementType> colorTexture;
 
-// Perform min/max operations in hardware
-// Using Kepler's video instructions, see http://docs.nvidia.com/cuda/parallel-thread-execution/#axzz3jbhbcTZf																			//  : "=r"(v) overwrites v and puts it in a register
-// see https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html
+// ******************* math util func ********************
 
+__device__ inline Vec3f absmax3f(const Vec3f& v1, const Vec3f& v2) { return Vec3f(v1.x*v1.x > v2.x*v2.x ? v1.x : v2.x, v1.y*v1.y > v2.y*v2.y ? v1.y : v2.y, v1.z*v1.z > v2.z*v2.z ? v1.z : v2.z); }
 __device__ __inline__ int   min_min(int a, int b, int c) { int v; asm("vmin.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 __device__ __inline__ int   min_max(int a, int b, int c) { int v; asm("vmin.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 __device__ __inline__ int   max_min(int a, int b, int c) { int v; asm("vmax.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
@@ -117,12 +139,20 @@ __device__ __inline__ float spanBeginKepler(float a0, float a1, float b0, float 
 __device__ __inline__ float spanEndKepler(float a0, float a1, float b0, float b1, float c0, float c1, float d)	{ return fmin_fmin(fmaxf(a0, a1), fmaxf(b0, b1), fmax_fmin(c0, c1, d)); }
 __device__ __inline__ void swap2(int& a, int& b){ int temp = a; a = b; b = temp;}
 
-__device__ void intersectBVHandTriangles(const float4 rayorig, const float4 raydir,
-	int& hitTriIdx, float& hitdistance, int& debugbingo, Vec3f& trinormal, int leafcount, int tricount, bool anyHit)
+// ******************* functions ********************
+
+// intersectBVHandTriangles
+__device__ void intersectBVHandTriangles(
+	const float4 rayorig, 
+	const float4 raydir,
+	int& hitTriIdx, 
+	float& hitdistance, 
+	Vec3f& trinormal, 
+	bool anyHit)
 {
 	// assign a CUDA thread to every pixel by using the threadIndex
 	// global threadId, see richiesams blogspot
-	int thread_index = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+	//int thread_index = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
 	///////////////////////////////////////////
 	//// KEPLER KERNEL
@@ -133,7 +163,7 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 
 	// Live state during traversal, stored in registers.
 
-	int		rayidx;		// not used, can be removed
+	//int		rayidx;		// not used, can be removed
 	float   origx, origy, origz;    // Ray origin.
 	float   dirx, diry, dirz;       // Ray direction.
 	float   tmin;                   // t-value from which the ray starts. Usually 0.
@@ -146,22 +176,16 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 	int     hitIndex;               // Triangle index of the closest intersection, -1 if none.
 	float   hitT;                   // t-value of the closest intersection.
 	
-	int threadId1; // ipv rayidx
+	//int threadId1; // ipv rayidx
 
 	// Initialize (stores local variables in registers)
 	{
 		// Pick ray index.
 
-		threadId1 = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * (blockIdx.x + gridDim.x * blockIdx.y));
+		//threadId1 = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * (blockIdx.x + gridDim.x * blockIdx.y));
 		
 
 		// Fetch ray.
-
-		// required when tracing ray batches
-		// float4 o = rays[rayidx * 2 + 0];  
-		// float4 d = rays[rayidx * 2 + 1];
-		//__shared__ volatile int nextRayArray[MaxBlockHeight]; // Current ray index in global buffer.
-
 		origx = rayorig.x;
 		origy = rayorig.y;
 		origz = rayorig.z;
@@ -195,7 +219,7 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 	{
 		// Traverse internal nodes until all SIMD lanes have found a leaf.
 
-		bool searchingLeaf = true; // required for warp efficiency
+		//bool searchingLeaf = true; // required for warp efficiency
 		while (nodeAddr >= 0 && nodeAddr != EntrypointSentinel)  
 		{
 			// Fetch AABBs of the two child nodes.
@@ -233,7 +257,7 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 
 			// ray box intersection boundary tests:
 			
-			float ray_tmax = 1e20;
+			//float ray_tmax = 1e20;
 			bool traverseChild0 = (c0min <= c0max); // && (c0min >= tmin) && (c0min <= ray_tmax);
 			bool traverseChild1 = (c1min <= c1max); // && (c1min >= tmin) && (c1min <= ray_tmax);
 
@@ -268,7 +292,7 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 			// if nodeAddr less than 0 -> nodeAddr is a leaf
 			if (nodeAddr < 0 && leafAddr >= 0)  
 			{
-				searchingLeaf = false; // required for warp efficiency
+				//searchingLeaf = false; // required for warp efficiency
 				leafAddr = nodeAddr;  
 				nodeAddr = *(int*)stackPtr;  // pops next node from stack
 				stackPtr -= 4;  // decrements stackptr by 4 bytes (because stackPtr is a pointer to char)
@@ -403,15 +427,15 @@ __device__ void intersectBVHandTriangles(const float4 rayorig, const float4 rayd
 	hitdistance = hitT;
 }
 
-// union struct required for mapping pixel colours to OpenGL buffer
-union Colour  // 4 bytes = 4 chars = 1 float
-{
-	float c;
-	uchar4 components;
-};
-
-__device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, const float4* gpuNodes, const float4* gpuTriWoops, 
-	const float4* gpuDebugTris, const int* gpuTriIndices, Vec3f& rayorig, Vec3f& raydir, unsigned int leafcount, unsigned int tricount) 
+// renderKernel:
+// - ray scene traversal
+// - surface/media interaction
+// - return color of a pixel
+__device__ Vec3f renderKernel(
+	curandState* randstate, 
+	const float4* HDRmap, 
+	Vec3f& rayorig, 
+	Vec3f& raydir) 
 {
 	Vec3f mask = Vec3f(1.0f, 1.0f, 1.0f); // colour mask
 	Vec3f accucolor = Vec3f(0.0f, 0.0f, 0.0f); // accumulated colour
@@ -447,7 +471,6 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 		Vec3f trinormal = Vec3f(0, 0, 0);
 
 		Refl_t refltype;
-		int debugbingo = 0;
 
 		// ------------------------ scene interaction ----------------------------
 
@@ -455,7 +478,10 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 		intersectBVHandTriangles(
 			make_float4(rayorig.x, rayorig.y, rayorig.z, RAY_MIN), 
 			make_float4(raydir.x, raydir.y, raydir.z, RAY_MAX),
-			bestTriIdx, hitDistance, debugbingo, trinormal, leafcount, tricount, false);
+			bestTriIdx, 
+			hitDistance, 
+			trinormal,
+			false);
 		
 		if (hitDistance < sceneT && hitDistance > RAY_MIN) { // triangle hit
 			sceneT = hitDistance;
@@ -464,13 +490,13 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 		}
 
 		// ground
-		GroundPlane ground {-0.78f};
-		if ((hitSphereDist = ground.intersect(Ray(rayorig, raydir)))
-		  && hitSphereDist < sceneT 
-		  && hitSphereDist > RAY_MIN) { 
-			sceneT = hitSphereDist;
-			geomtype = GEO_GROUND;
-		}
+		// GroundPlane ground {-0.78f};
+		// if ((hitSphereDist = ground.intersect(Ray(rayorig, raydir)))
+		//   && hitSphereDist < sceneT 
+		//   && hitSphereDist > RAY_MIN) { 
+		// 	sceneT = hitSphereDist;
+		// 	geomtype = GEO_GROUND;
+		// }
 
 		// spheres
 		Sphere spheres[] = {
@@ -502,36 +528,20 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 			);
 			if (sampledMedium) {
 				rayorig = hitpoint;
-
-				if (rayorig.lengthsq() > 400.0f) { // max length = 20
-					return Vec3f(0.1f, 0.1f, 0.1f);
-				} else {
-					raydir = nextdir;
-					continue;
-				}
+				raydir = nextdir;
+				continue;
 			}
 		}
 
 		// environmental sphere
-	#ifdef HDR
 		if (sceneT > 1e10f) {
-
-			// HDR environment map code based on Syntopia "Path tracing 3D fractals"
-			// http://blog.hvidtfeldts.net/index.php/2015/01/path-tracing-3d-fractals/
-			// https://github.com/Syntopia/Fragmentarium/blob/master/Fragmentarium-Source/Examples/Include/IBL-Pathtracer.frag
-			// GLSL code: 
-			// vec3 equirectangularMap(sampler2D sampler, vec3 dir) {
-			//		dir = normalize(dir);
-			//		vec2 longlat = vec2(atan(dir.y, dir.x) + RotateMap, acos(dir.z));
-			//		return texture2D(sampler, longlat / vec2(2.0*PI, PI)).xyz; }
-
 			// Convert (normalized) dir to spherical coordinates.
 			float longlatX = atan2f(raydir.x, raydir.z); // Y is up, swap x for y and z for x
 			longlatX = longlatX < 0.f ? longlatX + TWO_PI : longlatX;  // wrap around full circle if negative
 			float longlatY = acosf(raydir.y); // add RotateMap at some point, see Fragmentarium
 			
 			// map theta and phi to u and v texturecoordinates in [0,1] x [0,1] range
-			float offsetY = 0.5f;
+			//float offsetY = 0.5f;
 			float u = longlatX / TWO_PI; // +offsetY;
 			float v = longlatY / M_PI ; 
 
@@ -550,12 +560,8 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 			accucolor += (mask * emit); 
 			return accucolor; 
 		}
-	#else
-		if (sceneT > 1e10f) {
-			return Vec3f(0.1f, 0.1f, 0.1f);
-		}
-	#endif // end of HDR
 
+		// ---------------------- interaction ----------------------
 		hitpoint = rayorig + raydir * sceneT;
 
 		// GROUND:
@@ -583,8 +589,8 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 			//Vec3f colour = hitTriIdx->_colorf;
 			objcol = Vec3f(0.9f, 0.3f, 0.1f); // hardcoded triangle colour  .9f, 0.3f, 0.0f
 			emit = Vec3f(0.0, 0.0, 0.0);  // object emission
-			refltype = MAT_GLASS; // objectmaterial
-			objMedium = MEDIUM_TEST;
+			refltype = MAT_DIFF; // objectmaterial
+			objMedium = MEDIUM_NO;
 		}
 
 		n.normalize();
@@ -619,9 +625,18 @@ __device__ Vec3f renderKernel(curandState* randstate, const float4* HDRmap, cons
 	return accucolor;
 }
 
-__global__ void PathTracingKernel(Vec3f* output, Vec3f* accumbuffer, const float4* HDRmap, const float4* gpuNodes, const float4* gpuTriWoops,
-  const float4* gpuDebugTris, const int* gpuTriIndices, unsigned int framenumber, unsigned int hashedframenumber, unsigned int leafcount,
-  unsigned int tricount, const Camera* cudaRendercam)
+// pathTracingKernel:
+// - originate ray of a pixel
+// - anti-aliasing
+// - depth of field
+// - return averaged color of the pixel
+__global__ void pathTracingKernel(
+	Vec3f* output, 
+	Vec3f* accumbuffer, 
+	const float4* HDRmap, 
+	unsigned int framenumber, 
+	unsigned int hashedframenumber, 
+	const Camera* cudaRendercam)
 {
   // assign a CUDA thread to every pixel by using the threadIndex
   unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
@@ -649,7 +664,7 @@ __global__ void PathTracingKernel(Vec3f* output, Vec3f* accumbuffer, const float
   Vec3f cx = Vec3f(scrwidth * .5135f / scrheight, 0.0f, 0.0f);  // ray direction offset along X-axis 
   Vec3f cy = (cross(cx, camdir)).normalize() * .5135f; // ray dir offset along Y-axis, .5135 is FOV angle
 
-  for (int s = 0; s < samps; s++) {
+  for (int s = 0; s < NUM_SAMPLE; s++) {
 
     // compute primary ray direction
     // use camera view of current frame (transformed on CPU side) to create local orthonormal basis
@@ -709,43 +724,55 @@ __global__ void PathTracingKernel(Vec3f* output, Vec3f* accumbuffer, const float
     // ray origin
     Vec3f originInWorldSpace = aperturePoint;
 
-    finalcol += renderKernel(&randState, HDRmap, gpuNodes, gpuTriWoops, gpuDebugTris, gpuTriIndices,
-        originInWorldSpace, rayInWorldSpace, leafcount, tricount) * (1.0f / samps);
-  }
+    finalcol += renderKernel(
+		&randState, 
+		HDRmap,
+        originInWorldSpace, 
+		rayInWorldSpace) * (1.0f / NUM_SAMPLE);
+	}
 
-  // add pixel colour to accumulation buffer (accumulates all samples) 
-  accumbuffer[i] += finalcol;
+	// add pixel colour to accumulation buffer (accumulates all samples) 
+	accumbuffer[i] += finalcol;
 
-  // averaged colour: divide colour by the number of calculated frames so far
-  Vec3f tempcol = accumbuffer[i] / framenumber;
+	// averaged colour: divide colour by the number of calculated frames so far
+	Vec3f tempcol = accumbuffer[i] / framenumber;
 
-  Colour fcolour;
-  Vec3f colour = Vec3f(clamp(tempcol.x, 0.0f, 1.0f), clamp(tempcol.y, 0.0f, 1.0f), clamp(tempcol.z, 0.0f, 1.0f));
+	// union struct required for mapping pixel colours to OpenGL buffer
+	union Colour  // 4 bytes = 4 chars = 1 float
+	{
+		float c;
+		uchar4 components;
+	};
 
-  // convert from 96-bit to 24-bit colour + perform gamma correction
-  fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
-    (unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
-    (unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
+	Colour fcolour;
+	Vec3f colour = Vec3f(clamp(tempcol.x, 0.0f, 1.0f), clamp(tempcol.y, 0.0f, 1.0f), clamp(tempcol.z, 0.0f, 1.0f));
 
-  // store pixel coordinates and pixelcolour in OpenGL readable outputbuffer
-  output[i] = Vec3f(x, y, fcolour.c);
+	// convert from 96-bit to 24-bit colour + perform gamma correction
+	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
+		(unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
+		(unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
+
+	// store pixel coordinates and pixelcolour in OpenGL readable outputbuffer
+	output[i] = Vec3f(x, y, fcolour.c);
 }
 
-bool firstTime = true;
-
-// the gateway to CUDA, called from C++ (in void disp() in main.cpp)
+// cudaRender
+// - bind buffers to textures
+// - kernal dimension setting
+// - launch kernal
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
 	Vec3f* outputbuf, Vec3f* accumbuf, const float4* HDRmap, const unsigned int framenumber, const unsigned int hashedframenumber, 
 	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam)
 {
+	static bool firstTime = true;
 
+	// texture binding
 	if (firstTime) {
-		// if this is the first time cudarender() is called,
-		// bind the scene data to CUDA textures!
 		firstTime = false;
 		
+		// bvh textures
 		cudaChannelFormatDesc channel0desc = cudaCreateChannelDesc<int>();
-		cudaBindTexture(NULL, &triIndicesTexture, triInds, &channel0desc, (tricnt * 3 + leafnodecnt) * sizeof(int));  // is tricnt wel juist??
+		cudaBindTexture(NULL, &triIndicesTexture, triInds, &channel0desc, (tricnt * 3 + leafnodecnt) * sizeof(int));
 
 		cudaChannelFormatDesc channel1desc = cudaCreateChannelDesc<float4>();
 		cudaBindTexture(NULL, &triWoopTexture, triWoops, &channel1desc, (tricnt * 3 + leafnodecnt) * sizeof(float4));
@@ -753,23 +780,41 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 		cudaChannelFormatDesc channel3desc = cudaCreateChannelDesc<float4>();
 		cudaBindTexture(NULL, &bvhNodesTexture, nodes, &channel3desc, nodeSize * sizeof(float4)); 
 
+		// hdr texture
 		HDRtexture.filterMode = cudaFilterModeLinear;
 
 		cudaChannelFormatDesc channel4desc = cudaCreateChannelDesc<float4>(); 
-		cudaBindTexture(NULL, &HDRtexture, HDRmap, &channel4desc, HDRwidth * HDRheight * sizeof(float4));  // 2k map:
+		cudaBindTexture(NULL, &HDRtexture, HDRmap, &channel4desc, HDRwidth * HDRheight * sizeof(float4));
+
+		// color texture
+		// colorTexture.normalized = false;
+		// colorTexture.filterMode = cudaFilterModeLinear;
+		// colorTexture.addressMode[0] = cudaAddressModeWrap;
+		// colorTexture.addressMode[1] = cudaAddressModeWrap;
+		// colorTexture.addressMode[2] = cudaAddressModeWrap;
+		// colorTexture.maxAnisotropy = 8;
+		// colorTexture.sRGB = true;
+
+		// cudaChannelFormatDesc channel5desc = cudaCreateChannelDesc<uchar4>(); 
+		// cudaBindTexture(NULL, &colorTexture, textureBuffer, &channel5desc, TextureWidth * TextureHeight * sizeof(uchar4));
 
 		printf("CudaWoopTriangles texture initialised, tri count: %d\n", tricnt);
 	}
 
-	dim3 block(16, 16, 1);   // dim3 CUDA specific syntax, block and grid are required to schedule CUDA threads over streaming multiprocessors
-	dim3 grid(scrwidth / block.x, scrheight / block.y, 1);
+	dim3 threadsPerBlock (16, 16, 1);   // dim3 CUDA specific syntax, block and grid are required to schedule CUDA threads over streaming multiprocessors
+	dim3 fullBlocksPerGrid (scrwidth / threadsPerBlock.x, scrheight / threadsPerBlock.y, 1);
 
 	// Configure grid and block sizes:
-	int threadsPerBlock = 256;
+	// int threadsPerBlock = 256;
 	// Compute the number of blocks required, performing a ceiling operation to make sure there are enough:
-	int fullBlocksPerGrid = ((scrwidth * scrheight) + threadsPerBlock - 1) / threadsPerBlock;
+	// int fullBlocksPerGrid = ((scrwidth * scrheight) + threadsPerBlock - 1) / threadsPerBlock;
 	// <<<fullBlocksPerGrid, threadsPerBlock>>>
-	PathTracingKernel << <grid, block >> >(outputbuf, accumbuf, HDRmap, nodes, triWoops, debugTris, 
-		triInds, framenumber, hashedframenumber, leafnodecnt, tricnt, cudaRenderCam);  // texdata, texoffsets
+	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>>(
+		outputbuf, 
+		accumbuf, 
+		HDRmap, 
+		framenumber, 
+		hashedframenumber, 
+		cudaRenderCam);  // texdata, texoffsets
 
 }

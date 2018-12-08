@@ -5,8 +5,13 @@
 #include "Geometry.h"
 #include "linear_math.h"
 
-#define M_PI 3.14156265
+#ifndef M_PI
+#define M_PI 3.1415926535897932384626422832795028841971f
+#endif
+
+#ifndef PI_OVER_TWO
 #define PI_OVER_TWO 1.5707963267948966192313216916397514420985
+#endif
 
 // Camera struct, used to store interactive camera data, copied to the GPU and used by CUDA for each frame
 struct Camera {

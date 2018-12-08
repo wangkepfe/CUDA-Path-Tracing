@@ -26,7 +26,7 @@
 */
 
 #include "CudaBVH.h"
-#include "SceneLoader.h"  // required for triangles and vertices
+//#include "SceneLoader.h"  // required for triangles and vertices
 
 //Nodes / BVHLayout_Compact  (12 floats + 4 ints = 64 bytes)
 // innernode contains two childnodes c0 and c1, each having x,y,z coords for AABBhi and AABBlo, 2*2*3 = 12 floats 
@@ -184,7 +184,6 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 				// add the transformed woop triangle to triWoopData
 				
 				triWoopData.add((Vec4i*)m_woop, 3);  
-				
 				triDebugData.add((Vec4i*)m_debugtri, 3);  
 
 				// add tri index for current triangle to triIndexData	
@@ -266,8 +265,8 @@ void CudaBVH::woopifyTri(const BVH& bvh, int triIdx)
 
 	// fetch the 3 vertex indices of this triangle
 	const Vec3i& vtxInds = bvh.getScene()->getTriangle(bvh.getTriIndices()[triIdx]).vertices; 
-  const Vec3f& v0 = bvh.getScene()->getVertex(vtxInds.x);
-  const Vec3f& v1 = bvh.getScene()->getVertex(vtxInds.y);
+    const Vec3f& v0 = bvh.getScene()->getVertex(vtxInds.x);
+    const Vec3f& v1 = bvh.getScene()->getVertex(vtxInds.y);
 	const Vec3f& v2 = bvh.getScene()->getVertex(vtxInds.z);
 	
 	// regular triangles (for debugging only)

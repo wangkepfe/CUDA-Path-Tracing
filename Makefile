@@ -11,7 +11,7 @@ EXE=raytracer
 OUT_FLAGS=-o ${EXE}
 # -----------------------------------------------
 SRC_DIR=src
-SRC=$(wildcard ${SRC_DIR}/*.cpp ${SRC_DIR}/*.cu)
+SRC=$(wildcard ${SRC_DIR}/*.cpp ${SRC_DIR}/*.cc ${SRC_DIR}/*.cu)
 # -----------------------------------------------
 COMPILER=nvcc
 FLAGS=${OUT_FLAGS} ${INC_FLAGS} ${LIB_FLAGS}
