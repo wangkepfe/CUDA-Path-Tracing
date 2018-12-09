@@ -118,7 +118,7 @@ texture<float4, 1, cudaReadModeElementType> triNormalsTexture;
 texture<int, 1, cudaReadModeElementType> triIndicesTexture;
 
 // hdr
-texture<float4, 1, cudaReadModeElementType> HDRtexture;
+texture<float4, cudaTextureType2D, cudaReadModeElementType> HDRtexture;
 
 // color texture
 texture<uchar4, cudaTextureType2D, cudaReadModeElementType> colorTexture;
@@ -433,7 +433,6 @@ __device__ void intersectBVHandTriangles(
 // - return color of a pixel
 __device__ Vec3f renderKernel(
 	curandState* randstate, 
-	const float4* HDRmap, 
 	Vec3f& rayorig, 
 	Vec3f& raydir) 
 {
@@ -545,18 +544,9 @@ __device__ Vec3f renderKernel(
 			float u = longlatX / TWO_PI; // +offsetY;
 			float v = longlatY / M_PI ; 
 
-			// map u, v to integer coordinates
-			int u2 = (int)(u * HDRwidth); //% HDRwidth;
-			int v2 = (int)(v * HDRheight); // % HDRheight;
+			float4 HDRcol = tex2D(HDRtexture, u, v);
 
-			// compute the texel index in the HDR map 
-			int HDRtexelidx = u2 + v2 * HDRwidth;
-
-			//float4 HDRcol = HDRmap[HDRtexelidx];
-			float4 HDRcol = tex1Dfetch(HDRtexture, HDRtexelidx);  // fetch from texture
-			Vec3f HDRcol2 = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
-
-			emit = HDRcol2 * 2.0f;
+			emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
 			accucolor += (mask * emit); 
 			return accucolor; 
 		}
@@ -633,7 +623,6 @@ __device__ Vec3f renderKernel(
 __global__ void pathTracingKernel(
 	Vec3f* output, 
 	Vec3f* accumbuffer, 
-	const float4* HDRmap, 
 	unsigned int framenumber, 
 	unsigned int hashedframenumber, 
 	const Camera* cudaRendercam)
@@ -726,7 +715,6 @@ __global__ void pathTracingKernel(
 
     finalcol += renderKernel(
 		&randState, 
-		HDRmap,
         originInWorldSpace, 
 		rayInWorldSpace) * (1.0f / NUM_SAMPLE);
 	}
@@ -761,7 +749,7 @@ __global__ void pathTracingKernel(
 // - kernal dimension setting
 // - launch kernal
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
-	Vec3f* outputbuf, Vec3f* accumbuf, const float4* HDRmap, const unsigned int framenumber, const unsigned int hashedframenumber, 
+	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const unsigned int framenumber, const unsigned int hashedframenumber, 
 	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam)
 {
 	static bool firstTime = true;
@@ -781,10 +769,14 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 		cudaBindTexture(NULL, &bvhNodesTexture, nodes, &channel3desc, nodeSize * sizeof(float4)); 
 
 		// hdr texture
+		HDRtexture.addressMode[0] = cudaAddressModeClamp;
+		HDRtexture.addressMode[1] = cudaAddressModeClamp;
 		HDRtexture.filterMode = cudaFilterModeLinear;
+		HDRtexture.normalized = true;
 
 		cudaChannelFormatDesc channel4desc = cudaCreateChannelDesc<float4>(); 
-		cudaBindTexture(NULL, &HDRtexture, HDRmap, &channel4desc, HDRwidth * HDRheight * sizeof(float4));
+		cudaBindTextureToArray(HDRtexture, HDRmap, channel4desc);
+
 
 		// color texture
 		// colorTexture.normalized = false;
@@ -809,10 +801,9 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 	// Compute the number of blocks required, performing a ceiling operation to make sure there are enough:
 	// int fullBlocksPerGrid = ((scrwidth * scrheight) + threadsPerBlock - 1) / threadsPerBlock;
 	// <<<fullBlocksPerGrid, threadsPerBlock>>>
-	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>>(
+	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>> (
 		outputbuf, 
 		accumbuf, 
-		HDRmap, 
 		framenumber, 
 		hashedframenumber, 
 		cudaRenderCam);  // texdata, texoffsets

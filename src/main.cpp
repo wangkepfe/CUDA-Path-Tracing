@@ -78,12 +78,12 @@ Vec3f *accumulatebuffer = NULL;  // image buffer storing accumulated pixel sampl
 Vec3f *finaloutputbuffer = NULL; // stores averaged pixel samples
 
 // hdr env map
-float4 *gpuHDRenv = NULL;
+cudaArray *gpuHDRenv = NULL;
 Vec4f *cpuHDRenv = NULL;
 
 // texture
-unsigned char* cpuTextureBuffer = NULL;
-uchar4* gpuTextureBuffer = NULL;
+//unsigned char* cpuTextureBuffer = NULL;
+//cudaArray *gpuTextureArray = NULL;
 
 // gl vbo
 GLuint vbo;
@@ -242,17 +242,20 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	std::cout << "Successfully created BVH cache file!\n";
 }
 
+// init texture
 void initTexture() 
 {
-	int texWidth, texHeight, texChannel, desiredChannel = STBI_rgb_alpha;
-	cpuTextureBuffer = stbi_load(textureFile.c_str(), &texWidth, &texHeight, &texChannel, desiredChannel);
+	// int texWidth, texHeight, texChannel, desiredChannel = STBI_rgb_alpha;
+	// cpuTextureBuffer = stbi_load(textureFile.c_str(), &texWidth, &texHeight, &texChannel, desiredChannel);
 
-	std::cout << "texture file loaded: " << textureFile << ", size = (" << texWidth << ", " << texHeight << "), channel = " << texChannel << "\n";
+	// std::cout << "texture file loaded: " << textureFile << ", size = (" << texWidth << ", " << texHeight << "), channel = " << texChannel << "\n";
 
-	cudaMalloc(&gpuTextureBuffer, texWidth * texHeight * sizeof(uchar4));
-	cudaMemcpy(gpuTextureBuffer, cpuTextureBuffer, texWidth * texHeight * sizeof(uchar4), cudaMemcpyHostToDevice);
+    // // Allocate array and copy image data
+    // cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindUnsigned);
+    // cudaMallocArray(&gpuTextureArray, &channelDesc, texWidth, texHeight);
+    // cudaMemcpyToArray(gpuTextureArray, 0, 0, cpuTextureBuffer, texWidth * texHeight * texChannel * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
-	stbi_image_free(cpuTextureBuffer);
+	// stbi_image_free(cpuTextureBuffer);
 }  
 
 // HDR environment map
@@ -285,8 +288,9 @@ void initHDR()
 	}
 
 	// copy HDR map to CUDA
-	cudaMalloc(&gpuHDRenv, HDRwidth * HDRheight * sizeof(float4));
-	cudaMemcpy(gpuHDRenv, cpuHDRenv, HDRwidth * HDRheight * sizeof(float4), cudaMemcpyHostToDevice);
+	cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>(); 
+	cudaMallocArray(&gpuHDRenv, &channelDesc, HDRwidth, HDRheight);
+    cudaMemcpyToArray(gpuHDRenv, 0, 0, cpuHDRenv, HDRwidth * HDRheight * sizeof(float4), cudaMemcpyHostToDevice);
 }
 
 // cuda memory alloc and copy to gpu
@@ -402,8 +406,9 @@ void deleteCudaAndCpuMemory()
 	cudaFree(cudaRendercam);
 	cudaFree(accumulatebuffer);
 	cudaFree(finaloutputbuffer);
-	cudaFree(gpuHDRenv);
-	cudaFree(gpuTextureBuffer);
+
+	cudaFreeArray(gpuHDRenv);
+	//cudaFree(gpuTextureBuffer);
 
 	// release CPU memory
 	free(cpuNodePtr);
@@ -453,7 +458,7 @@ int main(int argc, char **argv)
 
 	initCUDAscenedata(); // copy scene data to the GPU, ready to be used by CUDA
 	initHDR();			 // initialise the HDR environment map
-	initTexture();
+	//initTexture();
 
 	// initialise GLUT
 	glutInit(&argc, argv);

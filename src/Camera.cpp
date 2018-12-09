@@ -9,7 +9,7 @@ InteractiveCamera::InteractiveCamera()
 	yaw = 0;
 	pitch = 0.3;
 	radius = 5;
-	apertureRadius = 0.04; 
+	apertureRadius = 0.0; 
 	focalDistance = 5.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);  
