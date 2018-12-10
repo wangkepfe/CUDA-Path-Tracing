@@ -19,9 +19,6 @@ using Vector3f = Vec3f;
 using Float = float;
 using Spectrum = Vec3f;
 
-__device__ inline Vec2f& operator*(float a, Vec2f& v){ v.x *= a; v.y *= a;           return v; }
-__device__ inline Vec3f& operator*(float a, Vec3f& v){ v.x *= a; v.y *= a; v.z *= a; return v; }
-
 // ------------------------------- perfect diffuse: lambertian reflection --------------------------------------
 
 __device__ inline Point2f ConcentricSampleDisk(Point2f u) {

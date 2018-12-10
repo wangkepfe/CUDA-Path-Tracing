@@ -99,11 +99,13 @@ public:
 	Array<Vec4i>&  getNodeBuffer(void)            { return m_nodes; }
 	Array<Vec4i>&  getTriWoopBuffer(void)         { return m_triWoop; }
 	Array<S32>&    getTriIndexBuffer(void)        { return m_triIndex; }
+	Array<Vec2i>&  getUvBuffer(void)    { return m_uv; }
 
 	Vec4i*  getGpuNodes(void)            { return m_gpuNodes; }
 	Vec4i*  getGpuTriWoop(void)         { return m_gpuTriWoop; }
 	Vec4i*  getDebugTri(void)			{ return m_debugTri;  }
 	S32*    getGpuTriIndices(void)        { return m_gpuTriIndices; }
+	Vec2i*  getGpuUv(void)            { return m_gpuUv; }
 
 	U32    getGpuNodesSize(void)			{ return m_gpuNodesSize; }
 	U32    getGpuTriWoopSize(void)			{ return m_gpuTriWoopSize; }
@@ -111,6 +113,7 @@ public:
 	U32    getGpuTriIndicesSize(void)        { return m_gpuTriIndicesSize; }
 	U32    getLeafnodeCount(void)			{ return m_leafnodecount; }
 	U32    getTriCount(void)			{ return m_tricount; }
+	U32    getGpuTriUvSize(void)                { return m_gpuUvSize; }
 
 	// AOS: idx ignored, returns entire buffer
 	// SOA: 0 <= idx < 4, returns one subarray  // idx between 0 and 4
@@ -129,22 +132,29 @@ private:
 private:
 	BVHLayout   m_layout;
 	
+	// not in use
 	Array<Vec4i>      m_nodes; 
 	Array<Vec4i>      m_triWoop;
 	Array<S32>        m_triIndex;
+	Array<Vec2i>      m_uv;
 
+	// in use, host buffer actually
 	Vec4i*	m_gpuNodes;
 	Vec4i*  m_gpuTriWoop;
 	Vec4i*  m_debugTri;
 	S32*	m_gpuTriIndices;
+	Vec2i*  m_gpuUv;
 
+	// sizes
 	U32     m_gpuNodesSize;
 	U32		m_gpuTriWoopSize;
 	U32     m_debugTriSize;
 	U32		m_gpuTriIndicesSize;
 	U32		m_leafnodecount;
 	U32     m_tricount;
+	U32     m_gpuUvSize;
 
+	// utils
 	Vec4f   m_woop[3];
 	Vec4f	m_debugtri[3];
 };

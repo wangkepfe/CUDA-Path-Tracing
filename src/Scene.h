@@ -36,7 +36,7 @@ public:
 	struct Triangle
 	{
 		Vec3i       vertices;   //3 vertex indices of triangle
-    Triangle() : vertices(Vec3i(0, 0, 0)) {};
+		Vec2f       uv[3];
 	};
 
 public:
@@ -62,6 +62,6 @@ private:
 	S32             m_numTris;
 	S32             m_numVerts;
 	Array<Triangle>      m_tris;     
-	Array<Vec3f>         m_verts; 
+	Array<Vec3f>         m_verts;
 };
 

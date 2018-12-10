@@ -24,7 +24,12 @@ struct Vec2f
 	inline __host__ __device__ Vec2f operator+(const Vec2f& v) const{ return Vec2f(x + v.x, y + v.y); }
 	inline __host__ __device__ Vec2f operator-(const Vec2f& v) const{ return Vec2f(x - v.x, y - v.y); }
 	inline __host__ __device__ Vec2f operator*(const Vec2f& v) const{ return Vec2f(x * v.x, y * v.y); }
+
+	inline __host__ __device__ Vec2f operator*(float a) const{ return Vec2f(x*a, y*a); }
+	inline __host__ __device__ Vec2f operator/(float a) const{ return Vec2f(x / a, y / a); }
 };
+
+inline __host__ __device__ Vec2f& operator*(float a, Vec2f& v){ v.x *= a; v.y *= a;           return v; }
 
 struct Vec2i
 {
@@ -77,6 +82,8 @@ struct Vec3f
 	inline __host__ __device__ bool operator!=(const Vec3f& v){ return x != v.x || y != v.y || z != v.z; }
 	inline __host__ __device__ bool operator==(const Vec3f& v){ return x == v.x && y == v.y && z == v.z; }
 };
+
+inline __host__ __device__ Vec3f& operator*(float a, Vec3f& v){ v.x *= a; v.y *= a; v.z *= a; return v; }
 
 struct Vec3i
 {

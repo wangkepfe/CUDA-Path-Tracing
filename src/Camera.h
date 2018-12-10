@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "Geometry.h"
 #include "linear_math.h"
 
 #ifndef M_PI

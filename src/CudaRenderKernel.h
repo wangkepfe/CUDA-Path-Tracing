@@ -13,8 +13,8 @@
 #define scrheight 720
 
 void cudaRender(const float4* cudaNodes, const float4* cudaTriWoops, const float4* cudaDebugTris, const int* cudaTriInds, 
-	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const unsigned int framenumber, const unsigned int hashedframenumber, 
-	const unsigned int totalnodecnt, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam);
+	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
+	const unsigned int totalnodecnt, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr);
 
 //------------------------------------------------------------------------
 // Constants.

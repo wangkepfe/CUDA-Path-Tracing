@@ -126,6 +126,7 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 	Array<Vec4i> triWoopData;
 	Array<Vec4i> triDebugData; // array for regular (non-woop) triangles
 	Array<S32> triIndexData;
+	Array<Vec2i> triUvData;
 
 	// construct a stack (array of stack entries) to help in filling the data arrays
 	Array<StackEntry> stack(StackEntry(bvh.getRoot(), 0)); // initialise stack to rootnode
@@ -190,11 +191,16 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 				triIndexData.add(bvh.getTriIndices()[j]); 
 				triIndexData.add(0); // zero padding because CUDA kernel uses same index for vertex array (3 vertices per triangle)
 				triIndexData.add(0); // and array of triangle indices
+
+				//
+				const Vec2f* uv = bvh.getScene()->getTriangle(bvh.getTriIndices()[j]).uv; 
+				triUvData.add((Vec2i*)uv, 3);
 			}
 
 			// Leaf node terminator to indicate end of leaf, stores hexadecimal value 0x80000000 (= 2147483648 in decimal)
 			triWoopData.add(0x80000000); // leafnode terminator code indicates the last triangle of the leaf node
 			triDebugData.add(0x80000000); 
+			triUvData.add(0x8000);
 			
 			// add extra zero to triangle indices array to indicate end of leaf
 			triIndexData.add(0);  // terminates triIndexdata for current leaf
@@ -219,6 +225,7 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 
 	// Write data arrays to arrays of CudaBVH
 
+	// node
 	m_gpuNodes = (Vec4i*) malloc(nodeData.getNumBytes());
 	m_gpuNodesSize = nodeData.getSize();
 	
@@ -229,6 +236,7 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 		m_gpuNodes[i].w = nodeData.get(i).w; // child indices
 	}	
 
+	// tri woop
 	m_gpuTriWoop = (Vec4i*) malloc(triWoopData.getSize() * sizeof(Vec4i));
 	m_gpuTriWoopSize = triWoopData.getSize();
 
@@ -239,6 +247,7 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 		m_gpuTriWoop[i].w = triWoopData.get(i).w;
 	}
 
+	// tri
 	m_debugTri = (Vec4i*)malloc(triDebugData.getSize() * sizeof(Vec4i));
 	m_debugTriSize = triDebugData.getSize();
 
@@ -249,6 +258,16 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 		m_debugTri[i].w = triDebugData.get(i).w; 
 	}
 
+	// uv
+	m_gpuUv = (Vec2i*)malloc(triUvData.getSize() * sizeof(Vec2i));
+	m_gpuUvSize = triUvData.getSize();
+
+	for (int i = 0; i < triUvData.getSize(); i++){
+		m_gpuUv[i].x = triUvData.get(i).x;
+		m_gpuUv[i].y = triUvData.get(i).y;
+	}
+
+	// idx
 	m_gpuTriIndices = (S32*) malloc(triIndexData.getSize() * sizeof(S32));
 	m_gpuTriIndicesSize = triIndexData.getSize();
 
@@ -280,7 +299,7 @@ void CudaBVH::woopifyTri(const BVH& bvh, int triIdx)
 	mtx.setCol(1, Vec4f(v1 - v2, 0.0f));
 	mtx.setCol(2, Vec4f(cross(v0 - v2, v1 - v2), 0.0f));
 	mtx.setCol(3, Vec4f(v2, 1.0f));
-	mtx = invert(mtx);   
+	mtx = invert(mtx);
 
 	/// m_woop[3] stores 3 transformed triangle edges
 	m_woop[0] = Vec4f(mtx(2, 0), mtx(2, 1), mtx(2, 2), -mtx(2, 3)); // elements of 3rd row of inverted matrix

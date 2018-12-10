@@ -26,6 +26,7 @@
 
 // utils
 #include "cutil_math.h"  // required for float3
+#include "mymath.h"
 
 // material modeling
 #include "reflection.cuh"
@@ -38,14 +39,6 @@
 #endif
 #define F32_MIN          (1.175494351e-38f)
 #define F32_MAX          (3.402823466e+38f)
-
-// hdr setting
-#define HDRwidth 4096
-#define HDRheight 2048
-
-// texture setting
-#define TextureWidth 256
-#define TextureHeight 256
 
 // bvh stack
 #define STACK_SIZE  64  // Size of the traversal stack in local memory.
@@ -114,14 +107,16 @@ struct MediumSS {
 // bvh
 texture<float4, 1, cudaReadModeElementType> bvhNodesTexture;
 texture<float4, 1, cudaReadModeElementType> triWoopTexture;
+texture<float4, 1, cudaReadModeElementType> triDebugTexture;
 texture<float4, 1, cudaReadModeElementType> triNormalsTexture;
 texture<int, 1, cudaReadModeElementType> triIndicesTexture;
+texture<float2, 1, cudaReadModeElementType> triUvTexture;
 
 // hdr
 texture<float4, cudaTextureType2D, cudaReadModeElementType> HDRtexture;
 
 // color texture
-texture<uchar4, cudaTextureType2D, cudaReadModeElementType> colorTexture;
+texture<float4, cudaTextureType2D, cudaReadModeElementType> colorTexture;
 
 // ******************* math util func ********************
 
@@ -147,7 +142,7 @@ __device__ void intersectBVHandTriangles(
 	const float4 raydir,
 	int& hitTriIdx, 
 	float& hitdistance, 
-	Vec3f& trinormal, 
+	Vec3f& trinormal,
 	bool anyHit)
 {
 	// assign a CUDA thread to every pixel by using the threadIndex
@@ -307,7 +302,7 @@ __device__ void intersectBVHandTriangles(
 			// if (!__any(searchingLeaf)) -> "__any" keyword: if none of the threads is searching a leaf, in other words
 			// if all threads in the warp found a leafnode, then break from while loop and go to triangle intersection
 
-			//if(!__any(leafAddr >= 0))     
+			//if(!__any(leafAddr >= 0))
 			//    break;
 
 			// if (!__any(searchingLeaf))
@@ -398,7 +393,7 @@ __device__ void intersectBVHandTriangles(
 							// because of Woop transformation, only one set of vectors works
 							
 							//trinormal = cross(Vec3f(v22.x, v22.y, v22.z), Vec3f(v11.x, v11.y, v11.z));  // works
-							trinormal = cross(Vec3f(v11.x, v11.y, v11.z), Vec3f(v22.x, v22.y, v22.z));  
+							trinormal = cross(Vec3f(v11.x, v11.y, v11.z), Vec3f(v22.x, v22.y, v22.z));
 						}
 					}
 				}
@@ -418,7 +413,7 @@ __device__ void intersectBVHandTriangles(
 	// Remap intersected triangle index, and store the result.
 
 	if (hitIndex != -1){
-		hitIndex = tex1Dfetch(triIndicesTexture, hitIndex);
+		// hitIndex = tex1Dfetch(triIndicesTexture, hitIndex);
 		// remapping tri indices delayed until this point for performance reasons
 		// (slow texture memory lookup in de triIndicesTexture) because multiple triangles per node can potentially be hit
 	}
@@ -452,8 +447,7 @@ __device__ Vec3f renderKernel(
 		bounces++){
 
 		int hitSphereIdx = -1;
-		int hitTriIdx = -1;
-		int bestTriIdx = -1;
+		int hitTriAddr = -1;
 		int geomtype = -1;
 
 		float hitSphereDist = 1e20;
@@ -468,6 +462,7 @@ __device__ Vec3f renderKernel(
 		Vec3f nl; // oriented normal
 		Vec3f nextdir; // ray direction of next path segment
 		Vec3f trinormal = Vec3f(0, 0, 0);
+		Vec2f hitUv = Vec2f(0, 0);
 
 		Refl_t refltype;
 
@@ -477,14 +472,13 @@ __device__ Vec3f renderKernel(
 		intersectBVHandTriangles(
 			make_float4(rayorig.x, rayorig.y, rayorig.z, RAY_MIN), 
 			make_float4(raydir.x, raydir.y, raydir.z, RAY_MAX),
-			bestTriIdx, 
+			hitTriAddr, 
 			hitDistance, 
 			trinormal,
 			false);
 		
 		if (hitDistance < sceneT && hitDistance > RAY_MIN) { // triangle hit
 			sceneT = hitDistance;
-			hitTriIdx = bestTriIdx;
 			geomtype = GEO_TRIANGLE;
 		}
 
@@ -545,8 +539,11 @@ __device__ Vec3f renderKernel(
 			float v = longlatY / M_PI ; 
 
 			float4 HDRcol = tex2D(HDRtexture, u, v);
-
 			emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
+
+			//float4 uvTex = tex2D(colorTexture, u, v);
+			//emit = Vec3f(uvTex.x, uvTex.y, uvTex.z) ;
+
 			accucolor += (mask * emit); 
 			return accucolor; 
 		}
@@ -573,13 +570,28 @@ __device__ Vec3f renderKernel(
 		}
 		// TRIANGLES:
 		else if (geomtype == GEO_TRIANGLE) {
-			//pBestTri = &pTriangles[triangle_id];
-			// float4 normal = tex1Dfetch(triNormalsTexture, pBestTriIdx);	
+			float4 p0 = tex1Dfetch(triDebugTexture, hitTriAddr);
+			float4 p1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);
+			float4 p2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);
+
+			float2 uv0 = tex1Dfetch(triUvTexture, hitTriAddr);
+			float2 uv1 = tex1Dfetch(triUvTexture, hitTriAddr + 1);
+			float2 uv2 = tex1Dfetch(triUvTexture, hitTriAddr + 2);
+
+			float u, v, w;
+			Barycentric(hitpoint, Vec3f(p0.x, p0.y, p0.z), Vec3f(p1.x, p1.y, p1.z), Vec3f(p2.x, p2.y, p2.z), u, v, w);
+
+			hitUv = Vec2f(uv0.x, uv0.y) * u + Vec2f(uv1.x, uv1.y) * v + Vec2f(uv2.x, uv2.y) * w;
+
 			n = trinormal;
-			//Vec3f colour = hitTriIdx->_colorf;
-			objcol = Vec3f(0.9f, 0.3f, 0.1f); // hardcoded triangle colour  .9f, 0.3f, 0.0f
-			emit = Vec3f(0.0, 0.0, 0.0);  // object emission
-			refltype = MAT_DIFF; // objectmaterial
+			//objcol = Vec3f(0.9f, 0.3f, 0.1f);
+			float4 colorTex = tex2D(colorTexture, hitUv.x, hitUv.y); 
+			objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
+
+			//objcol = Vec3f(hitUv.x, hitUv.y, 0.0);
+
+			emit = Vec3f(0.0, 0.0, 0.0);
+			refltype = MAT_DIFF;
 			objMedium = MEDIUM_NO;
 		}
 
@@ -749,8 +761,8 @@ __global__ void pathTracingKernel(
 // - kernal dimension setting
 // - launch kernal
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
-	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const unsigned int framenumber, const unsigned int hashedframenumber, 
-	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam)
+	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
+	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr)
 {
 	static bool firstTime = true;
 
@@ -765,8 +777,14 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 		cudaChannelFormatDesc channel1desc = cudaCreateChannelDesc<float4>();
 		cudaBindTexture(NULL, &triWoopTexture, triWoops, &channel1desc, (tricnt * 3 + leafnodecnt) * sizeof(float4));
 
+		cudaChannelFormatDesc channel2desc = cudaCreateChannelDesc<float2>();
+		cudaBindTexture(NULL, &triUvTexture, cudaUvPtr, &channel2desc, (tricnt * 3 + leafnodecnt) * sizeof(float2));
+
 		cudaChannelFormatDesc channel3desc = cudaCreateChannelDesc<float4>();
-		cudaBindTexture(NULL, &bvhNodesTexture, nodes, &channel3desc, nodeSize * sizeof(float4)); 
+		cudaBindTexture(NULL, &triDebugTexture, debugTris, &channel3desc, (tricnt * 3 + leafnodecnt) * sizeof(float4));
+
+		cudaChannelFormatDesc channel4desc = cudaCreateChannelDesc<float4>();
+		cudaBindTexture(NULL, &bvhNodesTexture, nodes, &channel4desc, nodeSize * sizeof(float4)); 
 
 		// hdr texture
 		HDRtexture.addressMode[0] = cudaAddressModeClamp;
@@ -774,21 +792,19 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 		HDRtexture.filterMode = cudaFilterModeLinear;
 		HDRtexture.normalized = true;
 
-		cudaChannelFormatDesc channel4desc = cudaCreateChannelDesc<float4>(); 
-		cudaBindTextureToArray(HDRtexture, HDRmap, channel4desc);
-
+		cudaChannelFormatDesc channel6desc = cudaCreateChannelDesc<float4>(); 
+		cudaBindTextureToArray(HDRtexture, HDRmap, channel6desc);
 
 		// color texture
-		// colorTexture.normalized = false;
-		// colorTexture.filterMode = cudaFilterModeLinear;
-		// colorTexture.addressMode[0] = cudaAddressModeWrap;
-		// colorTexture.addressMode[1] = cudaAddressModeWrap;
-		// colorTexture.addressMode[2] = cudaAddressModeWrap;
-		// colorTexture.maxAnisotropy = 8;
-		// colorTexture.sRGB = true;
+		colorTexture.normalized = true;
+		colorTexture.filterMode = cudaFilterModeLinear;
+		colorTexture.addressMode[0] = cudaAddressModeWrap;
+		colorTexture.addressMode[1] = cudaAddressModeWrap;
+		colorTexture.maxAnisotropy = 8;
+		colorTexture.sRGB = true;
 
-		// cudaChannelFormatDesc channel5desc = cudaCreateChannelDesc<uchar4>(); 
-		// cudaBindTexture(NULL, &colorTexture, textureBuffer, &channel5desc, TextureWidth * TextureHeight * sizeof(uchar4));
+		cudaChannelFormatDesc channel7desc = cudaCreateChannelDesc<float4>(); 
+		cudaBindTextureToArray(colorTexture, colorArray, channel7desc);
 
 		printf("CudaWoopTriangles texture initialised, tri count: %d\n", tricnt);
 	}
