@@ -1,3 +1,15 @@
+# external dependancy
+- cuda
+- glut
+- glew
+
+# note
+Scene file, texture files, materials are all hardcoded
+
+user interaction with mouse and keyboards
+
+# reference
+
 framework based on Matching Socks CUDA path tracer by Samuel Lapere, 2016 https://raytracey.blogspot.com
 
 bvh based on the GPU ray tracing framework of Timo Aila, Samuli Laine and Tero Karras (Nvidia Research)
