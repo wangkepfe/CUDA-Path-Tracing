@@ -45,7 +45,7 @@
 #include "CudaRenderKernel.h"
 
 // user input (hard coded)
-const std::string scenefile = "data/head3d_simp25.obj";
+const std::string scenefile = "data/head3d_solid.obj";
 const std::string HDRmapname = "data/pisa.hdr";
 const std::string textureFile = "data/head3d.jpg";
 
@@ -56,6 +56,7 @@ Vec4i *cpuTriDebugPtr = NULL;
 S32 *cpuTriIndicesPtr = NULL;
 
 Vec2i *cpuUvPtr = NULL;
+Vec4i *cpuNormalPtr = NULL;
 
 float4 *cudaNodePtr = NULL;
 float4 *cudaTriWoopPtr = NULL;
@@ -63,6 +64,7 @@ float4 *cudaTriDebugPtr = NULL;
 S32 *cudaTriIndicesPtr = NULL;
 
 float2 *cudaUvPtr = NULL;
+float4 *cudaNormalPtr = NULL;
 
 CudaBVH *gpuBVH = NULL;
 
@@ -96,6 +98,7 @@ int triWoopSize = 0;
 int triDebugSize = 0;
 int triIndicesSize = 0;
 int triUvSize = 0;
+int triNormalSize = 0;
 
 // cache bvh param
 bool nocachedBVH = false;
@@ -153,7 +156,7 @@ void disp(void)
 	// gateway from host to CUDA, passes all data needed to render frame (triangles, BVH tree, camera) to CUDA for execution
 	cudaRender(cudaNodePtr, cudaTriWoopPtr, cudaTriDebugPtr, cudaTriIndicesPtr, finaloutputbuffer,
 			   accumulatebuffer, gpuHDRenv, gpuTextureArray, framenumber, hashedframes, nodeSize, leafnode_count, triangle_count, cudaRendercam,
-			   cudaUvPtr);
+			   cudaUvPtr, cudaNormalPtr);
 
 	cudaThreadSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -188,6 +191,8 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 		std::cout << "Error reading BVH cache file!\n";
 	if (1 != fread(&triUvSize, sizeof(unsigned), 1, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
+	if (1 != fread(&triNormalSize, sizeof(unsigned), 1, BVHcachefile))
+		std::cout << "Error reading BVH cache file!\n";
 
 	std::cout << "Number of nodes: " << nodeSize << "\n";
 	std::cout << "Number of triangles: " << triangle_count << "\n";
@@ -198,6 +203,7 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	cpuTriDebugPtr = (Vec4i *)malloc(triDebugSize * sizeof(Vec4i));
 	cpuTriIndicesPtr = (S32 *)malloc(triIndicesSize * sizeof(S32));
 	cpuUvPtr = (Vec2i *)malloc(triUvSize * sizeof(Vec2i));
+	cpuNormalPtr = (Vec4i *)malloc(triNormalSize * sizeof(Vec4i));
 
 	if (nodeSize != fread(cpuNodePtr, sizeof(Vec4i), nodeSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
@@ -208,6 +214,8 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	if (triIndicesSize != fread(cpuTriIndicesPtr, sizeof(S32), triIndicesSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
 	if (triUvSize != fread(cpuUvPtr, sizeof(Vec2i), triUvSize, BVHcachefile))
+		std::cout << "Error reading BVH cache file!\n";
+	if (triNormalSize != fread(cpuNormalPtr, sizeof(Vec4i), triNormalSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
 
 	fclose(BVHcachefile);
@@ -234,6 +242,11 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 		std::cout << "Error writing BVH cache file!\n";
 	if (1 != fwrite(&triUvSize, sizeof(unsigned), 1, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
+	if (1 != fwrite(&triNormalSize, sizeof(unsigned), 1, BVHcachefile))
+		std::cout << "Error writing BVH cache file!\n";
+
+
+
 	if (nodeSize != fwrite(cpuNodePtr, sizeof(Vec4i), nodeSize, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
 	if (triWoopSize != fwrite(cpuTriWoopPtr, sizeof(Vec4i), triWoopSize, BVHcachefile))
@@ -243,6 +256,8 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	if (triIndicesSize != fwrite(cpuTriIndicesPtr, sizeof(S32), triIndicesSize, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
 	if (triUvSize != fwrite(cpuUvPtr, sizeof(Vec2i), triUvSize, BVHcachefile))
+		std::cout << "Error writing BVH cache file!\n";
+	if (triNormalSize != fwrite(cpuNormalPtr, sizeof(Vec4i), triNormalSize, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
 
 	fclose(BVHcachefile);
@@ -335,6 +350,10 @@ void initCUDAscenedata()
 	cudaMalloc((void **)&cudaUvPtr, triUvSize * sizeof(float2));
 	cudaMemcpy(cudaUvPtr, cpuUvPtr, triUvSize * sizeof(float2), cudaMemcpyHostToDevice);
 
+	// normal
+	cudaMalloc((void **)&cudaNormalPtr, triNormalSize * sizeof(float4));
+	cudaMemcpy(cudaNormalPtr, cpuNormalPtr, triNormalSize * sizeof(float4), cudaMemcpyHostToDevice);
+
 
 	std::cout << "Scene data copied to CUDA\n";
 }
@@ -371,9 +390,15 @@ void createBVH()
 			int vi1 = indices[i * 3 + 1].vertex_index;
 			int vi2 = indices[i * 3 + 2].vertex_index;
 			newtri.vertices = Vec3i(vi0, vi1, vi2);
+
 			newtri.uv[0] = Vec2f(attrib.texcoords[indices[i * 3    ].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3    ].texcoord_index * 2 + 1]);
 			newtri.uv[1] = Vec2f(attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2 + 1]);
 			newtri.uv[2] = Vec2f(attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2 + 1]);
+
+			newtri.normal[0] = Vec3f(attrib.normals[indices[i * 3    ].normal_index * 3], attrib.normals[indices[i * 3    ].normal_index * 3 + 1], attrib.normals[indices[i * 3    ].normal_index * 3 + 2]);
+			newtri.normal[1] = Vec3f(attrib.normals[indices[i * 3 + 1].normal_index * 3], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 2]);
+			newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
+
 			tris.add(newtri);
 		}
 		totalTriangleCount += indices.size() / 3;
@@ -411,6 +436,7 @@ void createBVH()
 	cpuTriIndicesPtr = gpuBVH->getGpuTriIndices();
 
 	cpuUvPtr         = gpuBVH->getGpuUv();
+	cpuNormalPtr         = gpuBVH->getGpuNormal();
 
 	nodeSize         = gpuBVH->getGpuNodesSize();
 	triWoopSize      = gpuBVH->getGpuTriWoopSize();
@@ -420,6 +446,7 @@ void createBVH()
 	triangle_count   = gpuBVH->getTriCount();
 
 	triUvSize        = gpuBVH->getGpuTriUvSize();
+	triNormalSize        = gpuBVH->getGpuTriNormalSize();
 }
 
 // clean
@@ -434,6 +461,7 @@ void deleteCudaAndCpuMemory()
 	cudaFree(accumulatebuffer);
 	cudaFree(finaloutputbuffer);
 	cudaFree(cudaUvPtr);
+	cudaFree(cudaNormalPtr);
 
 	cudaFreeArray(gpuHDRenv);
 	cudaFreeArray(gpuTextureArray);
@@ -444,6 +472,7 @@ void deleteCudaAndCpuMemory()
 	free(cpuTriDebugPtr);
 	free(cpuTriIndicesPtr);
 	free(cpuUvPtr);
+	free(cpuNormalPtr);
 
 	delete hostRendercam;
 	delete interactiveCamera;

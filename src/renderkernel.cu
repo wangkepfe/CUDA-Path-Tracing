@@ -52,14 +52,14 @@
 
 // sampling settings
 #define NUM_SAMPLE 1
-#define USE_RUSSIAN true
-#define RUSSIAN_P 0.7
-#define LIGHT_BOUNCE 100
+#define USE_RUSSIAN false
+#define RUSSIAN_P 0.98
+#define LIGHT_BOUNCE 80
 
 // ******************* structures ********************
 
 // enum
-enum Refl_t { MAT_DIFF, MAT_MIRROR, MAT_GLASS };  // material types
+enum Refl_t { MAT_EMIT, MAT_DIFF, MAT_MIRROR, MAT_GLASS, MAT_NO };  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
 enum Medium_t {MEDIUM_NO = -1, MEDIUM_TEST = 0};
 
@@ -108,9 +108,9 @@ struct MediumSS {
 texture<float4, 1, cudaReadModeElementType> bvhNodesTexture;
 texture<float4, 1, cudaReadModeElementType> triWoopTexture;
 texture<float4, 1, cudaReadModeElementType> triDebugTexture;
-texture<float4, 1, cudaReadModeElementType> triNormalsTexture;
 texture<int, 1, cudaReadModeElementType> triIndicesTexture;
 texture<float2, 1, cudaReadModeElementType> triUvTexture;
+texture<float4, 1, cudaReadModeElementType> triNormalTexture;
 
 // hdr
 texture<float4, cudaTextureType2D, cudaReadModeElementType> HDRtexture;
@@ -429,7 +429,8 @@ __device__ void intersectBVHandTriangles(
 __device__ Vec3f renderKernel(
 	curandState* randstate, 
 	Vec3f& rayorig, 
-	Vec3f& raydir) 
+	Vec3f& raydir, 
+	const Camera* cudaRendercam) 
 {
 	Vec3f mask = Vec3f(1.0f, 1.0f, 1.0f); // colour mask
 	Vec3f accucolor = Vec3f(0.0f, 0.0f, 0.0f); // accumulated colour
@@ -466,6 +467,8 @@ __device__ Vec3f renderKernel(
 
 		Refl_t refltype;
 
+		float etaT = 1.43f;
+
 		// ------------------------ scene interaction ----------------------------
 
 		// triangles
@@ -492,9 +495,11 @@ __device__ Vec3f renderKernel(
 		// }
 
 		// spheres
+		//Vec3f lightBallPos = Vec3f(8.0f * cosf(cudaRendercam->envMapRotation), 0.0f, 8.0f * sinf(cudaRendercam->envMapRotation));
 		Sphere spheres[] = {
 			//{ 0.78f, { 0.0f, 0.0f, -3.0f }, { 0.0, 0.0, 0.0 }, { 1.0f, 1.0f, 1.0f }, MAT_GLASS, 1},
-			{ 0.0f, { 0.0f, 0.0f, 0.0f }, { 0.0, 0.0, 0.0 }, { 0.0f, 0.0f, 0.0f }, MAT_DIFF, MEDIUM_NO} // null ball
+			{ 0.0f, { 0.0f, 0.0f, 0.0f }, { 0.0, 0.0, 0.0 }, { 0.0f, 0.0f, 0.0f }, MAT_DIFF, MEDIUM_NO}, // null
+			//{ 1.0f, lightBallPos, { 2.0, 2.0, 2.0 }, { 0.0f, 0.0f, 0.0f }, MAT_EMIT, MEDIUM_NO} // light
 		};
 		float numspheres = sizeof(spheres) / sizeof(Sphere);
 		for (int i = int(numspheres); i--;){  // for all spheres in scene
@@ -508,7 +513,7 @@ __device__ Vec3f renderKernel(
 
 		// participating media
 		if (medium != MEDIUM_NO) {
-			MediumSS med {{5, 3, 6}, {0.05, 0.05, 0.05}, 0.2f};
+			MediumSS med {{0.74 * 30, 0.88 * 30, 1.01 * 30}, {0.032, 0.17, 0.48}, 0.5f};
 			bool sampledMedium;
 			HomogeneousMedium(
 				curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate),
@@ -533,16 +538,16 @@ __device__ Vec3f renderKernel(
 			longlatX = longlatX < 0.f ? longlatX + TWO_PI : longlatX;  // wrap around full circle if negative
 			float longlatY = acosf(raydir.y); // add RotateMap at some point, see Fragmentarium
 			
-			// map theta and phi to u and v texturecoordinates in [0,1] x [0,1] range
-			//float offsetY = 0.5f;
-			float u = longlatX / TWO_PI; // +offsetY;
-			float v = longlatY / M_PI ; 
+			float u = fmod(longlatX / (float)TWO_PI + cudaRendercam->envMapRotation, 1.0f); // +offsetY;
+			float v = longlatY / M_PI;
 
 			float4 HDRcol = tex2D(HDRtexture, u, v);
-			emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
-
-			//float4 uvTex = tex2D(colorTexture, u, v);
-			//emit = Vec3f(uvTex.x, uvTex.y, uvTex.z) ;
+			if (cudaRendercam->testLighting) {
+				emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z) * 2.0f;
+			} else {
+				emit = Vec3f(0.1f, 0.1f, 0.1f);
+			}
+			
 
 			accucolor += (mask * emit); 
 			return accucolor; 
@@ -578,21 +583,54 @@ __device__ Vec3f renderKernel(
 			float2 uv1 = tex1Dfetch(triUvTexture, hitTriAddr + 1);
 			float2 uv2 = tex1Dfetch(triUvTexture, hitTriAddr + 2);
 
+			float4 normal0 = tex1Dfetch(triNormalTexture, hitTriAddr);
+			float4 normal1 = tex1Dfetch(triNormalTexture, hitTriAddr + 1);
+			float4 normal2 = tex1Dfetch(triNormalTexture, hitTriAddr + 2);
+
 			float u, v, w;
 			Barycentric(hitpoint, Vec3f(p0.x, p0.y, p0.z), Vec3f(p1.x, p1.y, p1.z), Vec3f(p2.x, p2.y, p2.z), u, v, w);
 
 			hitUv = Vec2f(uv0.x, uv0.y) * u + Vec2f(uv1.x, uv1.y) * v + Vec2f(uv2.x, uv2.y) * w;
 
-			n = trinormal;
-			//objcol = Vec3f(0.9f, 0.3f, 0.1f);
+			Vec3f smoothNormal = Vec3f(normal0.x, normal0.y, normal0.z) * u
+				               + Vec3f(normal1.x, normal1.y, normal1.z) * v
+				               + Vec3f(normal2.x, normal2.y, normal2.z) * w;
+
+			if (cudaRendercam->testNormal) {
+				n = smoothNormal;
+			} else {
+				n = trinormal;
+			}
+
 			float4 colorTex = tex2D(colorTexture, hitUv.x, hitUv.y); 
-			objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
 
-			//objcol = Vec3f(hitUv.x, hitUv.y, 0.0);
-
+			if (cudaRendercam->testTexture) {
+				objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
+			} else {
+				objcol = Vec3f(1.0f, 1.0f, 1.0f);
+			}
+			
 			emit = Vec3f(0.0, 0.0, 0.0);
-			refltype = MAT_DIFF;
-			objMedium = MEDIUM_NO;
+
+			if (cudaRendercam->testMaterialIdx == 0) { // diff
+				refltype = MAT_DIFF;
+				objMedium = MEDIUM_NO;
+			} else if (cudaRendercam->testMaterialIdx == 1) { // mirror
+				refltype = MAT_MIRROR;
+				objMedium = MEDIUM_NO;
+			} else if (cudaRendercam->testMaterialIdx == 3) { // glass
+				refltype = MAT_GLASS;
+				objMedium = MEDIUM_NO;
+			} else if (cudaRendercam->testMaterialIdx == 4) { // no surface + medium
+				refltype = MAT_NO;
+				objMedium = MEDIUM_TEST;
+			} else if (cudaRendercam->testMaterialIdx == 5) { // glass + medium
+				refltype = MAT_GLASS;
+				objMedium = MEDIUM_TEST;
+			} else {
+				refltype = MAT_DIFF;
+				objMedium = MEDIUM_NO;
+			}
 		}
 
 		n.normalize();
@@ -602,7 +640,9 @@ __device__ Vec3f renderKernel(
 		accucolor += (mask * emit);
 
 		// ------------------------ material ----------------------------
-		if (refltype == MAT_DIFF) {
+		if (refltype == MAT_EMIT) {
+			return accucolor; 
+		} else if (refltype == MAT_DIFF) {
 			lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
 			hitpoint += nl * RAY_MIN; 
 			mask *= objcol;
@@ -611,12 +651,20 @@ __device__ Vec3f renderKernel(
 			nextdir = raydir - n * dot(n, raydir) * 2.0f;
 			nextdir.normalize();
 			hitpoint += nl * RAY_MIN;
+			mask *= objcol;
 		}
 		else if (refltype == MAT_GLASS) {
 			bool refl;
-			specularGlass(curand_uniform(randstate), into, raydir, nextdir, nl, refl);
+			specularGlass(curand_uniform(randstate), into, raydir, nextdir, nl, refl, etaT);
 			hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
 			if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
+			if (!refl) mask *= objcol;
+		} else if (refltype == MAT_NO) {
+			bool refl = false;
+			nextdir = raydir;
+			hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
+			if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
+			if (!refl) mask *= objcol;
 		}
 		// bssrdf
 
@@ -728,7 +776,8 @@ __global__ void pathTracingKernel(
     finalcol += renderKernel(
 		&randState, 
         originInWorldSpace, 
-		rayInWorldSpace) * (1.0f / NUM_SAMPLE);
+		rayInWorldSpace,
+		cudaRendercam) * (1.0f / NUM_SAMPLE);
 	}
 
 	// add pixel colour to accumulation buffer (accumulates all samples) 
@@ -762,7 +811,8 @@ __global__ void pathTracingKernel(
 // - launch kernal
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
 	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
-	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr)
+	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr,
+	const float4 *cudaNormalPtr)
 {
 	static bool firstTime = true;
 
@@ -785,6 +835,9 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 
 		cudaChannelFormatDesc channel4desc = cudaCreateChannelDesc<float4>();
 		cudaBindTexture(NULL, &bvhNodesTexture, nodes, &channel4desc, nodeSize * sizeof(float4)); 
+
+		cudaChannelFormatDesc channel5desc = cudaCreateChannelDesc<float4>();
+		cudaBindTexture(NULL, &triNormalTexture, cudaNormalPtr, &channel5desc, (tricnt * 3 + leafnodecnt) * sizeof(float4)); 
 
 		// hdr texture
 		HDRtexture.addressMode[0] = cudaAddressModeClamp;

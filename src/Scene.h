@@ -37,6 +37,7 @@ public:
 	{
 		Vec3i       vertices;   //3 vertex indices of triangle
 		Vec2f       uv[3];
+		Vec3f       normal[3];
 	};
 
 public:

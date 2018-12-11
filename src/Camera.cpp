@@ -9,11 +9,17 @@ InteractiveCamera::InteractiveCamera()
 	yaw = 0;
 	pitch = 0.3;
 	radius = 5;
-	apertureRadius = 0.0; 
+	apertureRadius = 0.02; 
 	focalDistance = 5.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);  
 	fov = Vec2f(40, 40);
+
+	envMapRotation = 0;
+	testMaterialIdx = 0;
+	testTexture = 1;
+	testNormal = 1;
+	testLighting = 1;
 }
 
 InteractiveCamera::~InteractiveCamera() {}
@@ -109,6 +115,12 @@ void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
 	renderCamera->fov = Vec2f(fov.x, fov.y);
 	renderCamera->apertureRadius = apertureRadius;
 	renderCamera->focalDistance = focalDistance;
+
+	renderCamera->envMapRotation = envMapRotation;
+	renderCamera->testMaterialIdx = testMaterialIdx;
+	renderCamera->testTexture = testTexture;
+	renderCamera->testNormal = testNormal;
+	renderCamera->testLighting = testLighting;
 }
 
 float mod(float x, float y) { // Does this account for -y ???

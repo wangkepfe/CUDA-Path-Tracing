@@ -24,20 +24,35 @@ int theModifierState = 0;
 // keyboard interaction
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
+	const int TEST_MATERIAL_NUM = 10;
+
 	switch (key) {
 
 	case(27) : exit(0);
+
 	case(' ') : initCamera(); buffer_reset = true; break;
+
 	case('a') : interactiveCamera->strafe(-0.05f); buffer_reset = true; break;
 	case('d') : interactiveCamera->strafe(0.05f); buffer_reset = true; break;
+
 	case('r') : interactiveCamera->changeAltitude(0.05f); buffer_reset = true; break;
 	case('f') : interactiveCamera->changeAltitude(-0.05f); buffer_reset = true; break;
+
 	case('w') : interactiveCamera->goForward(0.05f); buffer_reset = true; break;
 	case('s') : interactiveCamera->goForward(-0.05f); buffer_reset = true; break;
+
 	case('g') : interactiveCamera->changeApertureDiameter(0.1); buffer_reset = true; break;
 	case('h') : interactiveCamera->changeApertureDiameter(-0.1); buffer_reset = true; break;
+
 	case('t') : interactiveCamera->changeFocalDistance(0.1); buffer_reset = true; break;
 	case('y') : interactiveCamera->changeFocalDistance(-0.1); buffer_reset = true; break;
+
+	case('j') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx + 1) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
+	case('k') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx - 1 + TEST_MATERIAL_NUM) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
+	
+	case('z') : interactiveCamera->testTexture ^= 1;  buffer_reset = true; break;
+	case('x') : interactiveCamera->testNormal ^= 1;  buffer_reset = true; break;
+	case('c') : interactiveCamera->testLighting ^= 1;  buffer_reset = true; break;
 	}
 }
 
@@ -63,8 +78,12 @@ void motion(int x, int y)
 
 		if (theButtonState == GLUT_LEFT_BUTTON)  // Rotate
 		{
-			interactiveCamera->changeYaw(deltaX * 0.01);
-			interactiveCamera->changePitch(-deltaY * 0.01);
+			if (theModifierState == GLUT_ACTIVE_SHIFT) {
+				interactiveCamera->envMapRotation = fmod(interactiveCamera->envMapRotation + TWO_PI + deltaX * 0.01f, TWO_PI);
+			} else {
+				interactiveCamera->changeYaw(deltaX * 0.01);
+				interactiveCamera->changePitch(-deltaY * 0.01);
+			}	
 		}
 		else if (theButtonState == GLUT_MIDDLE_BUTTON) // Zoom
 		{

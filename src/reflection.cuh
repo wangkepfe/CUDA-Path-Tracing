@@ -6,7 +6,10 @@
 #define PiOver4 0.78539816339
 #define PiOver2 1.57079632679
 #define Pi                    3.1415926535897932384626422832795028841971
-#define TWO_PI				  6.2831853071795864769252867665590057683943
+
+#ifndef TWO_PI
+#define TWO_PI 6.2831853071795864769252867665590057683943
+#endif
 
 #define Epsilon 1e-5
 
@@ -78,10 +81,10 @@ __device__ inline void specularGlass (
     Vec3f& raydir, 
     Vec3f& nextdir,
     Vec3f& n,
-    bool& refl)
+    bool& refl,
+    float etaT)
 {
     const float etaI = 1.0f;
-    const float etaT = 1.4f;
     const float eta = into ? etaI/etaT : etaT/etaI;
 
     Float cosThetaI = abs(dot(n, raydir)); // _cosThetaT_ needs to be positive

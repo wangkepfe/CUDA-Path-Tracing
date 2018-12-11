@@ -106,6 +106,7 @@ public:
 	Vec4i*  getDebugTri(void)			{ return m_debugTri;  }
 	S32*    getGpuTriIndices(void)        { return m_gpuTriIndices; }
 	Vec2i*  getGpuUv(void)            { return m_gpuUv; }
+	Vec4i*  getGpuNormal(void)            { return m_gpuNormal; }
 
 	U32    getGpuNodesSize(void)			{ return m_gpuNodesSize; }
 	U32    getGpuTriWoopSize(void)			{ return m_gpuTriWoopSize; }
@@ -114,6 +115,7 @@ public:
 	U32    getLeafnodeCount(void)			{ return m_leafnodecount; }
 	U32    getTriCount(void)			{ return m_tricount; }
 	U32    getGpuTriUvSize(void)                { return m_gpuUvSize; }
+	U32    getGpuTriNormalSize(void)                { return m_gpuNormalSize; }
 
 	// AOS: idx ignored, returns entire buffer
 	// SOA: 0 <= idx < 4, returns one subarray  // idx between 0 and 4
@@ -144,6 +146,7 @@ private:
 	Vec4i*  m_debugTri;
 	S32*	m_gpuTriIndices;
 	Vec2i*  m_gpuUv;
+	Vec4i*  m_gpuNormal;
 
 	// sizes
 	U32     m_gpuNodesSize;
@@ -153,6 +156,7 @@ private:
 	U32		m_leafnodecount;
 	U32     m_tricount;
 	U32     m_gpuUvSize;
+	U32     m_gpuNormalSize;
 
 	// utils
 	Vec4f   m_woop[3];

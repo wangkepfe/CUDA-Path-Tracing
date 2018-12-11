@@ -127,6 +127,7 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 	Array<Vec4i> triDebugData; // array for regular (non-woop) triangles
 	Array<S32> triIndexData;
 	Array<Vec2i> triUvData;
+	Array<Vec4i> triNormalData;
 
 	// construct a stack (array of stack entries) to help in filling the data arrays
 	Array<StackEntry> stack(StackEntry(bvh.getRoot(), 0)); // initialise stack to rootnode
@@ -195,12 +196,20 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 				//
 				const Vec2f* uv = bvh.getScene()->getTriangle(bvh.getTriIndices()[j]).uv; 
 				triUvData.add((Vec2i*)uv, 3);
+
+				//
+				const Vec3f* normal = bvh.getScene()->getTriangle(bvh.getTriIndices()[j]).normal;
+				Vec4f normaltri[3]; 
+				for (int k = 0; k < 3; ++k)
+					normaltri[k] = Vec4f(normal[k].x, normal[k].y, normal[k].z, 0.0f);
+				triNormalData.add((Vec4i*)normaltri, 3);
 			}
 
 			// Leaf node terminator to indicate end of leaf, stores hexadecimal value 0x80000000 (= 2147483648 in decimal)
 			triWoopData.add(0x80000000); // leafnode terminator code indicates the last triangle of the leaf node
 			triDebugData.add(0x80000000); 
 			triUvData.add(0x8000);
+			triNormalData.add(0x80000000);
 			
 			// add extra zero to triangle indices array to indicate end of leaf
 			triIndexData.add(0);  // terminates triIndexdata for current leaf
@@ -262,9 +271,20 @@ void CudaBVH::createCompact(const BVH& bvh, int nodeOffsetSizeDiv)
 	m_gpuUv = (Vec2i*)malloc(triUvData.getSize() * sizeof(Vec2i));
 	m_gpuUvSize = triUvData.getSize();
 
-	for (int i = 0; i < triUvData.getSize(); i++){
+	for (int i = 0; i < triUvData.getSize(); i++) {
 		m_gpuUv[i].x = triUvData.get(i).x;
 		m_gpuUv[i].y = triUvData.get(i).y;
+	}
+	
+	// normal
+	m_gpuNormal = (Vec4i*)malloc(triNormalData.getSize() * sizeof(Vec4i));
+	m_gpuNormalSize = triNormalData.getSize();
+
+	for (int i = 0; i < triNormalData.getSize(); i++) {
+		m_gpuNormal[i].x = triNormalData.get(i).x;
+		m_gpuNormal[i].y = triNormalData.get(i).y;
+		m_gpuNormal[i].z = triNormalData.get(i).z;
+		m_gpuNormal[i].w = triNormalData.get(i).w; 
 	}
 
 	// idx

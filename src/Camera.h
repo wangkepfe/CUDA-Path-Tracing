@@ -5,7 +5,11 @@
 #include "linear_math.h"
 
 #ifndef M_PI
-#define M_PI 3.1415926535897932384626422832795028841971f
+#define M_PI 3.1415926535897932384626422832795028841971
+#endif
+
+#ifndef TWO_PI
+#define TWO_PI 6.2831853071795864769252867665590057683943
 #endif
 
 #ifndef PI_OVER_TWO
@@ -21,6 +25,12 @@ struct Camera {
 	Vec2f fov;
 	float apertureRadius;
 	float focalDistance;
+
+	float envMapRotation;
+	int testMaterialIdx;
+	int testTexture;
+	int testNormal;
+	int testLighting;
 };
 
 // class for interactive camera object, updated on the CPU for each frame and copied into Camera struct
@@ -35,6 +45,7 @@ private:
 	float radius;
 	float apertureRadius;
 	float focalDistance;
+	
 
 	void fixYaw();
 	void fixPitch();
@@ -58,6 +69,12 @@ public:
 	void setFOVX(float fovx);
 
 	void buildRenderCamera(Camera* renderCamera);
+
+	float envMapRotation;
+	int testMaterialIdx;
+	int testTexture;
+	int testNormal;
+	int testLighting;
 
 	Vec2f resolution;
 	Vec2f fov;
