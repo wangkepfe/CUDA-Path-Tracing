@@ -45,9 +45,9 @@
 #include "CudaRenderKernel.h"
 
 // user input (hard coded)
-const std::string scenefile = "data/head3d_solid.obj";
+const std::string scenefile = "data/monkey_sphereUv_smoothN.obj";
 const std::string HDRmapname = "data/pisa.hdr";
-const std::string textureFile = "data/head3d.jpg";
+const std::string textureFile = "data/uv.png";
 
 // BVH
 Vec4i *cpuNodePtr = NULL;

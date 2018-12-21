@@ -20,6 +20,8 @@ InteractiveCamera::InteractiveCamera()
 	testTexture = 1;
 	testNormal = 1;
 	testLighting = 1;
+
+	testMaterialParam0 = 0.3f;
 }
 
 InteractiveCamera::~InteractiveCamera() {}
@@ -121,6 +123,7 @@ void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
 	renderCamera->testTexture = testTexture;
 	renderCamera->testNormal = testNormal;
 	renderCamera->testLighting = testLighting;
+	renderCamera->testMaterialParam0 = testMaterialParam0;
 }
 
 float mod(float x, float y) { // Does this account for -y ???

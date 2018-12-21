@@ -27,10 +27,13 @@ struct Camera {
 	float focalDistance;
 
 	float envMapRotation;
+
 	int testMaterialIdx;
 	int testTexture;
 	int testNormal;
 	int testLighting;
+
+	float testMaterialParam0;
 };
 
 // class for interactive camera object, updated on the CPU for each frame and copied into Camera struct
@@ -75,6 +78,8 @@ public:
 	int testTexture;
 	int testNormal;
 	int testLighting;
+
+	float testMaterialParam0;
 
 	Vec2f resolution;
 	Vec2f fov;

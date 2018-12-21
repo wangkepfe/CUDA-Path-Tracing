@@ -53,6 +53,9 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 	case('z') : interactiveCamera->testTexture ^= 1;  buffer_reset = true; break;
 	case('x') : interactiveCamera->testNormal ^= 1;  buffer_reset = true; break;
 	case('c') : interactiveCamera->testLighting ^= 1;  buffer_reset = true; break;
+
+	case('u') : interactiveCamera->testMaterialParam0 += 0.1f; buffer_reset = true; break;
+	case('i') : interactiveCamera->testMaterialParam0 -= 0.1f; buffer_reset = true; break;
 	}
 }
 

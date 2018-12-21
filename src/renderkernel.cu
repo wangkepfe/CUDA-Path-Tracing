@@ -59,7 +59,7 @@
 // ******************* structures ********************
 
 // enum
-enum Refl_t { MAT_EMIT, MAT_DIFF, MAT_MIRROR, MAT_GLASS, MAT_NO };  // material types
+enum Refl_t { MAT_EMIT, MAT_DIFF, MAT_MIRROR, MAT_GLASS, MAT_PLASTIC, MAT_NO };  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
 enum Medium_t {MEDIUM_NO = -1, MEDIUM_TEST = 0};
 
@@ -430,7 +430,7 @@ __device__ Vec3f renderKernel(
 	curandState* randstate, 
 	Vec3f& rayorig, 
 	Vec3f& raydir, 
-	const Camera* cudaRendercam) 
+	const Camera* userSetting) 
 {
 	Vec3f mask = Vec3f(1.0f, 1.0f, 1.0f); // colour mask
 	Vec3f accucolor = Vec3f(0.0f, 0.0f, 0.0f); // accumulated colour
@@ -495,7 +495,6 @@ __device__ Vec3f renderKernel(
 		// }
 
 		// spheres
-		//Vec3f lightBallPos = Vec3f(8.0f * cosf(cudaRendercam->envMapRotation), 0.0f, 8.0f * sinf(cudaRendercam->envMapRotation));
 		Sphere spheres[] = {
 			//{ 0.78f, { 0.0f, 0.0f, -3.0f }, { 0.0, 0.0, 0.0 }, { 1.0f, 1.0f, 1.0f }, MAT_GLASS, 1},
 			{ 0.0f, { 0.0f, 0.0f, 0.0f }, { 0.0, 0.0, 0.0 }, { 0.0f, 0.0f, 0.0f }, MAT_DIFF, MEDIUM_NO}, // null
@@ -538,11 +537,11 @@ __device__ Vec3f renderKernel(
 			longlatX = longlatX < 0.f ? longlatX + TWO_PI : longlatX;  // wrap around full circle if negative
 			float longlatY = acosf(raydir.y); // add RotateMap at some point, see Fragmentarium
 			
-			float u = fmod(longlatX / (float)TWO_PI + cudaRendercam->envMapRotation, 1.0f); // +offsetY;
+			float u = fmod(longlatX / (float)TWO_PI + userSetting->envMapRotation, 1.0f); // +offsetY;
 			float v = longlatY / M_PI;
 
 			float4 HDRcol = tex2D(HDRtexture, u, v);
-			if (cudaRendercam->testLighting) {
+			if (userSetting->testLighting) {
 				emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z) * 2.0f;
 			} else {
 				emit = Vec3f(0.1f, 0.1f, 0.1f);
@@ -575,9 +574,9 @@ __device__ Vec3f renderKernel(
 		}
 		// TRIANGLES:
 		else if (geomtype == GEO_TRIANGLE) {
-			float4 p0 = tex1Dfetch(triDebugTexture, hitTriAddr);
-			float4 p1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);
-			float4 p2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);
+			float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);
+			float4 po1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);
+			float4 po2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);
 
 			float2 uv0 = tex1Dfetch(triUvTexture, hitTriAddr);
 			float2 uv1 = tex1Dfetch(triUvTexture, hitTriAddr + 1);
@@ -587,24 +586,45 @@ __device__ Vec3f renderKernel(
 			float4 normal1 = tex1Dfetch(triNormalTexture, hitTriAddr + 1);
 			float4 normal2 = tex1Dfetch(triNormalTexture, hitTriAddr + 2);
 
+			Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
+			Vec3f p1 = Vec3f(po1.x, po1.y, po1.z);
+			Vec3f p2 = Vec3f(po2.x, po2.y, po2.z);
+
 			float u, v, w;
-			Barycentric(hitpoint, Vec3f(p0.x, p0.y, p0.z), Vec3f(p1.x, p1.y, p1.z), Vec3f(p2.x, p2.y, p2.z), u, v, w);
+			Barycentric(hitpoint, p0, p1, p2, u, v, w);
 
 			hitUv = Vec2f(uv0.x, uv0.y) * u + Vec2f(uv1.x, uv1.y) * v + Vec2f(uv2.x, uv2.y) * w;
 
-			Vec3f smoothNormal = Vec3f(normal0.x, normal0.y, normal0.z) * u
-				               + Vec3f(normal1.x, normal1.y, normal1.z) * v
-				               + Vec3f(normal2.x, normal2.y, normal2.z) * w;
+			Vec3f n0 = Vec3f(normal0.x, normal0.y, normal0.z);
+			Vec3f n1 = Vec3f(normal1.x, normal1.y, normal1.z);
+			Vec3f n2 = Vec3f(normal2.x, normal2.y, normal2.z);
 
-			if (cudaRendercam->testNormal) {
+			Vec3f smoothNormal = n0 * u + n1 * v + n2 * w;
+
+			smoothNormal.normalize();
+			trinormal.normalize();
+
+			if (userSetting->testNormal) {
 				n = smoothNormal;
+
+				// float cosAngle0 = dot(trinormal, n0);
+				// float cosAngle1 = dot(trinormal, n1);
+				// float cosAngle2 = dot(trinormal, n2);
+
+				// float invCos0 = 1.0f / cosAngle0;
+				// float invCos1 = 1.0f / cosAngle1;
+				// float invCos2 = 1.0f / cosAngle2;
+
+				// float radius = ((p0 - p1).length() * (invCos0 + invCos1) + (p0 - p2).length() * (invCos0 + invCos2) + (p1 - p2).length() * (invCos1 + invCos2)) / 12.0f;
+
+				// hitpoint = hitpoint + n * radius * (1.0f - dot(smoothNormal, trinormal));
 			} else {
 				n = trinormal;
 			}
 
 			float4 colorTex = tex2D(colorTexture, hitUv.x, hitUv.y); 
 
-			if (cudaRendercam->testTexture) {
+			if (userSetting->testTexture) {
 				objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
 			} else {
 				objcol = Vec3f(1.0f, 1.0f, 1.0f);
@@ -612,19 +632,22 @@ __device__ Vec3f renderKernel(
 			
 			emit = Vec3f(0.0, 0.0, 0.0);
 
-			if (cudaRendercam->testMaterialIdx == 0) { // diff
+			if (userSetting->testMaterialIdx == 0) {
 				refltype = MAT_DIFF;
 				objMedium = MEDIUM_NO;
-			} else if (cudaRendercam->testMaterialIdx == 1) { // mirror
+			} else if (userSetting->testMaterialIdx == 1) { // diff
+				refltype = MAT_PLASTIC;
+				objMedium = MEDIUM_NO;
+			} else if (userSetting->testMaterialIdx == 2) { // mirror
 				refltype = MAT_MIRROR;
 				objMedium = MEDIUM_NO;
-			} else if (cudaRendercam->testMaterialIdx == 3) { // glass
+			} else if (userSetting->testMaterialIdx == 3) { // glass
 				refltype = MAT_GLASS;
 				objMedium = MEDIUM_NO;
-			} else if (cudaRendercam->testMaterialIdx == 4) { // no surface + medium
+			} else if (userSetting->testMaterialIdx == 4) { // no surface + medium
 				refltype = MAT_NO;
 				objMedium = MEDIUM_TEST;
-			} else if (cudaRendercam->testMaterialIdx == 5) { // glass + medium
+			} else if (userSetting->testMaterialIdx == 5) { // glass + medium
 				refltype = MAT_GLASS;
 				objMedium = MEDIUM_TEST;
 			} else {
@@ -635,7 +658,7 @@ __device__ Vec3f renderKernel(
 
 		n.normalize();
 		bool into = dot(n, raydir) < 0;
-		nl = into ? n : n * -1;
+		nl = into ? n : n * -1.0f;
 
 		accucolor += (mask * emit);
 
@@ -646,14 +669,12 @@ __device__ Vec3f renderKernel(
 			lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
 			hitpoint += nl * RAY_MIN; 
 			mask *= objcol;
-		} 
-		else if (refltype == MAT_MIRROR) {
+		} else if (refltype == MAT_MIRROR) {
 			nextdir = raydir - n * dot(n, raydir) * 2.0f;
 			nextdir.normalize();
 			hitpoint += nl * RAY_MIN;
 			mask *= objcol;
-		}
-		else if (refltype == MAT_GLASS) {
+		} else if (refltype == MAT_GLASS) {
 			bool refl;
 			specularGlass(curand_uniform(randstate), into, raydir, nextdir, nl, refl, etaT);
 			hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
@@ -665,6 +686,16 @@ __device__ Vec3f renderKernel(
 			hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
 			if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
 			if (!refl) mask *= objcol;
+		} else if (refltype == MAT_PLASTIC) {
+			// float roughnessX = userSetting->testMaterialParam0;
+			// float roughnessY = userSetting->testMaterialParam0;
+			// nl.normalize();
+			// Vec3f tangent = cross(nl, Vec3f(1, 0, 0)).normalize();
+			// microfacetReflection(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, tangent, objcol, mask, roughnessX, roughnessY);
+			// hitpoint += nl * RAY_MIN; 
+			float alpha = userSetting->testMaterialParam0;
+			microfacetReflection2(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, objcol, mask, alpha);
+			hitpoint += nl * RAY_MIN;
 		}
 		// bssrdf
 

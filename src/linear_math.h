@@ -27,6 +27,8 @@ struct Vec2f
 
 	inline __host__ __device__ Vec2f operator*(float a) const{ return Vec2f(x*a, y*a); }
 	inline __host__ __device__ Vec2f operator/(float a) const{ return Vec2f(x / a, y / a); }
+
+	inline __host__ __device__ float operator[](unsigned int a) const { return _v[a]; }
 };
 
 inline __host__ __device__ Vec2f& operator*(float a, Vec2f& v){ v.x *= a; v.y *= a;           return v; }
@@ -84,6 +86,7 @@ struct Vec3f
 };
 
 inline __host__ __device__ Vec3f& operator*(float a, Vec3f& v){ v.x *= a; v.y *= a; v.z *= a; return v; }
+inline __host__ __device__ Vec3f operator-(const Vec3f& v) { return Vec3f(-v.x, -v.y, -v.z); }
 
 struct Vec3i
 {
@@ -137,6 +140,7 @@ inline __host__ __device__ Vec3f expf(const Vec3f& v){ return Vec3f(expf(v.x), e
 inline __host__ __device__ float clampf(float a, float lo, float hi){ return a < lo ? lo : a > hi ? hi : a; }
 inline __host__ __device__ Vec3f mixf(const Vec3f& v1, const Vec3f& v2, float a){ return v1 * (1.0 - a) + v2 * a; }
 inline __host__ __device__ float smoothstep(float edge0, float edge1, float x){ float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+inline __host__ __device__ Vec3f normalize(Vec3f& v) { return v.normalize(); }
 
 //-------------------------------------------------------------------------------------------------
 
