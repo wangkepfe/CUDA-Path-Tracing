@@ -62,7 +62,9 @@ struct Vec3f
 		float _v[3];
 	};
 
-	__host__ __device__ Vec3f(float _x = 0, float _y = 0, float _z = 0) : x(_x), y(_y), z(_z) {}
+	__host__ __device__ Vec3f() : x(0), y(0), z(0) {}
+	__host__ __device__ Vec3f(float _x) : x(_x), y(_x), z(_x) {}
+	__host__ __device__ Vec3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 	__host__ __device__ Vec3f(const Vec3f& v) : x(v.x), y(v.y), z(v.z) {}
 	inline __host__ __device__ float length(){ return sqrtf(x*x + y*y + z*z); }
 	// sometimes we dont need the sqrt, we are just comparing one length with another
@@ -70,6 +72,7 @@ struct Vec3f
 	inline __host__ __device__ float max(){ return max1f(max1f(x, y), z); }
 	inline __host__ __device__ float min(){ return min1f(min1f(x, y), z); }
 	inline __host__ __device__ Vec3f normalize(){ float norm = sqrtf(x*x + y*y + z*z); x /= norm; y /= norm; z /= norm; return Vec3f(x, y, z); }
+	inline __host__ __device__ Vec3f normalized(){ float norm = sqrtf(x*x + y*y + z*z); return Vec3f(x / norm, y / norm, z / norm); }
 	inline __host__ __device__ Vec3f& operator+=(const Vec3f& v){ x += v.x; y += v.y; z += v.z; return *this; }
 	inline __host__ __device__ Vec3f& operator-=(const Vec3f& v){ x -= v.x; y -= v.y; z -= v.z; return *this; }
 	inline __host__ __device__ Vec3f& operator*=(const float& a){ x *= a; y *= a; z *= a; return *this; }
@@ -83,6 +86,7 @@ struct Vec3f
 	inline __host__ __device__ Vec3f& operator/=(const float& a){ x /= a; y /= a; z /= a; return *this; }
 	inline __host__ __device__ bool operator!=(const Vec3f& v){ return x != v.x || y != v.y || z != v.z; }
 	inline __host__ __device__ bool operator==(const Vec3f& v){ return x == v.x && y == v.y && z == v.z; }
+	inline __host__ __device__ float operator[](int i) { return _v[i]; }
 };
 
 inline __host__ __device__ Vec3f& operator*(float a, Vec3f& v){ v.x *= a; v.y *= a; v.z *= a; return v; }
@@ -141,6 +145,7 @@ inline __host__ __device__ float clampf(float a, float lo, float hi){ return a <
 inline __host__ __device__ Vec3f mixf(const Vec3f& v1, const Vec3f& v2, float a){ return v1 * (1.0 - a) + v2 * a; }
 inline __host__ __device__ float smoothstep(float edge0, float edge1, float x){ float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
 inline __host__ __device__ Vec3f normalize(Vec3f& v) { return v.normalize(); }
+inline __host__ __device__ Vec3f minf3f(const float a, const Vec3f& v) { return Vec3f(v.x<a?v.x:a, v.y<a?v.y:a, v.y<a?v.y:a); }
 
 //-------------------------------------------------------------------------------------------------
 

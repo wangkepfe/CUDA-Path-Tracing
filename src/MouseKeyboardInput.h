@@ -56,6 +56,15 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
 	case('u') : interactiveCamera->testMaterialParam0 += 0.1f; buffer_reset = true; break;
 	case('i') : interactiveCamera->testMaterialParam0 -= 0.1f; buffer_reset = true; break;
+
+	case('o') : interactiveCamera->testMaterialParam1 += 0.1f; buffer_reset = true; break;
+	case('p') : interactiveCamera->testMaterialParam1 -= 0.1f; buffer_reset = true; break;
+
+	case('[') : interactiveCamera->testMaterialParam2 += 0.1f; buffer_reset = true; break;
+	case(']') : interactiveCamera->testMaterialParam2 -= 0.1f; buffer_reset = true; break;
+
+	case(',') : interactiveCamera->saveToFile(); break;
+	case('.') : interactiveCamera->loadFromFile(); buffer_reset = true; break;
 	}
 }
 

@@ -1,5 +1,8 @@
 // code for depth-of-field, mouse + keyboard user interaction based on https://github.com/peterkutz/GPUPathTracer
 #include <math.h>
+#include <iostream>
+#include <fstream>
+
 #include "Camera.h"
 #include "CudaRenderKernel.h"
 
@@ -9,7 +12,7 @@ InteractiveCamera::InteractiveCamera()
 	yaw = 0;
 	pitch = 0.3;
 	radius = 5;
-	apertureRadius = 0.02; 
+	apertureRadius = 0.0; 
 	focalDistance = 5.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);  
@@ -21,7 +24,9 @@ InteractiveCamera::InteractiveCamera()
 	testNormal = 1;
 	testLighting = 1;
 
-	testMaterialParam0 = 0.3f;
+	testMaterialParam0 = 0.1f;
+	testMaterialParam1 = 0.5f;
+	testMaterialParam2 = 0.5f;
 }
 
 InteractiveCamera::~InteractiveCamera() {}
@@ -107,8 +112,7 @@ void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
 	Vec3f directionToCamera = Vec3f(xDirection, yDirection, zDirection);
 	viewDirection = directionToCamera * (-1.0);
 	Vec3f eyePosition = centerPosition + directionToCamera * radius;
-	//Vec3f eyePosition = centerPosition; // rotate camera from stationary viewpoint
-
+	// Vec3f eyePosition = centerPosition; // rotate camera from stationary viewpoint
 
 	renderCamera->position = eyePosition;
 	renderCamera->view = viewDirection;
@@ -123,7 +127,10 @@ void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
 	renderCamera->testTexture = testTexture;
 	renderCamera->testNormal = testNormal;
 	renderCamera->testLighting = testLighting;
+
 	renderCamera->testMaterialParam0 = testMaterialParam0;
+	renderCamera->testMaterialParam1 = testMaterialParam1;
+	renderCamera->testMaterialParam2 = testMaterialParam2;
 }
 
 float mod(float x, float y) { // Does this account for -y ???
@@ -161,5 +168,26 @@ void InteractiveCamera::fixFocalDistance() {
 	float minFocalDist = 0.2;
 	float maxFocalDist = 100.0;
 	focalDistance = clamp2(focalDistance, minFocalDist, maxFocalDist);
+}
+
+const char* cameraFileName = "data/cameraSettings.cam";
+
+void InteractiveCamera::saveToFile() {
+	using namespace std;
+	ofstream myfile(cameraFileName, std::ofstream::out | std::ofstream::binary | std::ofstream::trunc);
+	if (myfile.is_open()) {
+		myfile.write(reinterpret_cast<char*>(this), sizeof(InteractiveCamera));
+		myfile.close();
+	}
+}
+
+void InteractiveCamera::loadFromFile() {
+	using namespace std;
+	ifstream infile(cameraFileName, std::ifstream::in | std::ifstream::binary);
+  	char* buffer = new char[sizeof(InteractiveCamera)];
+    infile.read (buffer, sizeof(InteractiveCamera));
+	*this = *reinterpret_cast<InteractiveCamera*>(buffer);
+  	delete[] buffer;
+  	infile.close();
 }
 

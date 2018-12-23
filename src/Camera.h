@@ -3,18 +3,7 @@
 #pragma once
 
 #include "linear_math.h"
-
-#ifndef M_PI
-#define M_PI 3.1415926535897932384626422832795028841971
-#endif
-
-#ifndef TWO_PI
-#define TWO_PI 6.2831853071795864769252867665590057683943
-#endif
-
-#ifndef PI_OVER_TWO
-#define PI_OVER_TWO 1.5707963267948966192313216916397514420985
-#endif
+#include "mathDefine.h"
 
 // Camera struct, used to store interactive camera data, copied to the GPU and used by CUDA for each frame
 struct Camera {
@@ -34,12 +23,14 @@ struct Camera {
 	int testLighting;
 
 	float testMaterialParam0;
+	float testMaterialParam1;
+	float testMaterialParam2;
 };
 
 // class for interactive camera object, updated on the CPU for each frame and copied into Camera struct
 class InteractiveCamera
 {
-private:
+public:
 
 	Vec3f centerPosition;
 	Vec3f viewDirection;
@@ -56,9 +47,8 @@ private:
 	void fixApertureRadius();
 	void fixFocalDistance();
 
-public:
 	InteractiveCamera();
-	virtual ~InteractiveCamera();
+	~InteractiveCamera();
 	void changeYaw(float m);
 	void changePitch(float m);
 	void changeRadius(float m);
@@ -73,6 +63,9 @@ public:
 
 	void buildRenderCamera(Camera* renderCamera);
 
+	void saveToFile();
+	void loadFromFile();
+
 	float envMapRotation;
 	int testMaterialIdx;
 	int testTexture;
@@ -80,6 +73,8 @@ public:
 	int testLighting;
 
 	float testMaterialParam0;
+	float testMaterialParam1;
+	float testMaterialParam2;
 
 	Vec2f resolution;
 	Vec2f fov;

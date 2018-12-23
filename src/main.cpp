@@ -14,6 +14,7 @@
 // c++
 #include <sstream>
 #include <iostream>
+#include <unordered_map>
 
 // bvh
 #include "Array.h"
@@ -45,9 +46,9 @@
 #include "CudaRenderKernel.h"
 
 // user input (hard coded)
-const std::string scenefile = "data/monkey_sphereUv_smoothN.obj";
+const std::string scenefile = "data/TestObj.obj";
 const std::string HDRmapname = "data/pisa.hdr";
-const std::string textureFile = "data/uv.png";
+const std::string textureFile = "data/Checker.png";
 
 // BVH
 Vec4i *cpuNodePtr = NULL;
@@ -67,6 +68,9 @@ float2 *cudaUvPtr = NULL;
 float4 *cudaNormalPtr = NULL;
 
 CudaBVH *gpuBVH = NULL;
+
+S32 *cpuMaterialPtr = NULL;
+S32 *cudaMaterialPtr = NULL;
 
 // camera
 Camera *cudaRendercam = NULL;
@@ -99,6 +103,7 @@ int triDebugSize = 0;
 int triIndicesSize = 0;
 int triUvSize = 0;
 int triNormalSize = 0;
+int triMaterialSize = 0;
 
 // cache bvh param
 bool nocachedBVH = false;
@@ -156,7 +161,7 @@ void disp(void)
 	// gateway from host to CUDA, passes all data needed to render frame (triangles, BVH tree, camera) to CUDA for execution
 	cudaRender(cudaNodePtr, cudaTriWoopPtr, cudaTriDebugPtr, cudaTriIndicesPtr, finaloutputbuffer,
 			   accumulatebuffer, gpuHDRenv, gpuTextureArray, framenumber, hashedframes, nodeSize, leafnode_count, triangle_count, cudaRendercam,
-			   cudaUvPtr, cudaNormalPtr);
+			   cudaUvPtr, cudaNormalPtr, cudaMaterialPtr);
 
 	cudaThreadSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -193,6 +198,8 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 		std::cout << "Error reading BVH cache file!\n";
 	if (1 != fread(&triNormalSize, sizeof(unsigned), 1, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
+	if (1 != fread(&triMaterialSize, sizeof(unsigned), 1, BVHcachefile))
+		std::cout << "Error reading BVH cache file!\n";
 
 	std::cout << "Number of nodes: " << nodeSize << "\n";
 	std::cout << "Number of triangles: " << triangle_count << "\n";
@@ -204,6 +211,7 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	cpuTriIndicesPtr = (S32 *)malloc(triIndicesSize * sizeof(S32));
 	cpuUvPtr = (Vec2i *)malloc(triUvSize * sizeof(Vec2i));
 	cpuNormalPtr = (Vec4i *)malloc(triNormalSize * sizeof(Vec4i));
+	cpuMaterialPtr = (S32 *)malloc(triMaterialSize * sizeof(S32));
 
 	if (nodeSize != fread(cpuNodePtr, sizeof(Vec4i), nodeSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
@@ -216,6 +224,8 @@ void loadBVHfromCache(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	if (triUvSize != fread(cpuUvPtr, sizeof(Vec2i), triUvSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
 	if (triNormalSize != fread(cpuNormalPtr, sizeof(Vec4i), triNormalSize, BVHcachefile))
+		std::cout << "Error reading BVH cache file!\n";
+	if (triMaterialSize != fread(cpuMaterialPtr, sizeof(S32), triMaterialSize, BVHcachefile))
 		std::cout << "Error reading BVH cache file!\n";
 
 	fclose(BVHcachefile);
@@ -244,6 +254,8 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 		std::cout << "Error writing BVH cache file!\n";
 	if (1 != fwrite(&triNormalSize, sizeof(unsigned), 1, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
+	if (1 != fwrite(&triMaterialSize, sizeof(unsigned), 1, BVHcachefile))
+		std::cout << "Error writing BVH cache file!\n";
 
 
 
@@ -258,6 +270,8 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 	if (triUvSize != fwrite(cpuUvPtr, sizeof(Vec2i), triUvSize, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
 	if (triNormalSize != fwrite(cpuNormalPtr, sizeof(Vec4i), triNormalSize, BVHcachefile))
+		std::cout << "Error writing BVH cache file!\n";
+	if (triMaterialSize != fwrite(cpuMaterialPtr, sizeof(S32), triMaterialSize, BVHcachefile))
 		std::cout << "Error writing BVH cache file!\n";
 
 	fclose(BVHcachefile);
@@ -354,6 +368,9 @@ void initCUDAscenedata()
 	cudaMalloc((void **)&cudaNormalPtr, triNormalSize * sizeof(float4));
 	cudaMemcpy(cudaNormalPtr, cpuNormalPtr, triNormalSize * sizeof(float4), cudaMemcpyHostToDevice);
 
+	// material
+	cudaMalloc((void **)&cudaMaterialPtr, triMaterialSize * sizeof(S32));
+	cudaMemcpy(cudaMaterialPtr, cpuMaterialPtr, triMaterialSize * sizeof(S32), cudaMemcpyHostToDevice);
 
 	std::cout << "Scene data copied to CUDA\n";
 }
@@ -366,7 +383,7 @@ void createBVH()
 	std::vector<tinyobj::material_t> materials;
 	std::string warn, err;
 
-	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scenefile.c_str()))
+	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scenefile.c_str(), "data"))
 	{
 		std::cout << "failed to load model!\n";
 	}
@@ -376,6 +393,8 @@ void createBVH()
 	tris.clear();
 	verts.clear();
 
+	std::vector<S32> matIds;
+
 	unsigned int totalTriangleCount = 0;
 	unsigned int totalVertPosCount = 0;
 
@@ -383,6 +402,7 @@ void createBVH()
 	for (const auto &shape : shapes)
 	{
 		const auto &indices = shape.mesh.indices;
+		const auto &matId = shape.mesh.material_ids;
 		for (unsigned int i = 0; i < indices.size() / 3; ++i)
 		{
 			Scene::Triangle newtri;
@@ -400,18 +420,23 @@ void createBVH()
 			newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
 
 			tris.add(newtri);
+
+			matIds.push_back(matId[i]);
 		}
 		totalTriangleCount += indices.size() / 3;
 	}
 
 	// vertex position
 	totalVertPosCount = attrib.vertices.size() / 3;
-	for (unsigned int i = 0; i < attrib.vertices.size() / 3; ++i)
-	{
+	for (unsigned int i = 0; i < attrib.vertices.size() / 3; ++i) {
 		verts.add(Vec3f(attrib.vertices[i * 3], attrib.vertices[i * 3 + 1], attrib.vertices[i * 3 + 2]));
 	}
 
-	// vertex uv
+	cpuMaterialPtr = new S32[totalTriangleCount];
+	for (unsigned int i = 0; i < totalTriangleCount; ++i) {
+		cpuMaterialPtr[i] = matIds[i];
+	}
+	triMaterialSize  = totalTriangleCount;
 
 	std::cout << "Scene loaded. vertices count: " << totalVertPosCount << ". face count: " << totalTriangleCount << ".\n";
 
@@ -436,7 +461,7 @@ void createBVH()
 	cpuTriIndicesPtr = gpuBVH->getGpuTriIndices();
 
 	cpuUvPtr         = gpuBVH->getGpuUv();
-	cpuNormalPtr         = gpuBVH->getGpuNormal();
+	cpuNormalPtr     = gpuBVH->getGpuNormal();
 
 	nodeSize         = gpuBVH->getGpuNodesSize();
 	triWoopSize      = gpuBVH->getGpuTriWoopSize();
@@ -446,7 +471,7 @@ void createBVH()
 	triangle_count   = gpuBVH->getTriCount();
 
 	triUvSize        = gpuBVH->getGpuTriUvSize();
-	triNormalSize        = gpuBVH->getGpuTriNormalSize();
+	triNormalSize    = gpuBVH->getGpuTriNormalSize();              
 }
 
 // clean
@@ -462,6 +487,7 @@ void deleteCudaAndCpuMemory()
 	cudaFree(finaloutputbuffer);
 	cudaFree(cudaUvPtr);
 	cudaFree(cudaNormalPtr);
+	cudaFree(cudaMaterialPtr);
 
 	cudaFreeArray(gpuHDRenv);
 	cudaFreeArray(gpuTextureArray);
@@ -473,6 +499,7 @@ void deleteCudaAndCpuMemory()
 	free(cpuTriIndicesPtr);
 	free(cpuUvPtr);
 	free(cpuNormalPtr);
+	delete cpuMaterialPtr;
 
 	delete hostRendercam;
 	delete interactiveCamera;
@@ -496,8 +523,8 @@ int main(int argc, char **argv)
 		nocachedBVH = true;
 	}
 
-	if (true) {   // overrule cache
-	//if (nocachedBVH) {
+	//if (true) {   // overrule cache
+	if (nocachedBVH) {
 		std::cout << "No cached BVH file available\nCreating new BVH...\n";
 		// initialise all data needed to start rendering (BVH data, triangles, vertices)
 		createBVH();
