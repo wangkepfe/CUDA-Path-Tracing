@@ -1,5 +1,4 @@
 # features
-# features
 ### Specular reflection (Mirror)
 <img src="renderingResult/specularReflection.PNG">
 ### Lambertian (Matte)
