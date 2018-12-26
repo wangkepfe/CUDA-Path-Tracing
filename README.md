@@ -1,8 +1,8 @@
 # features
-![alt text](https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/specularReflection.PNG "picture")
-*Mirror*
-![alt text](https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/lambertian.PNG "picture")
-*Lambertian*
+<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/specularReflection.PNG">
+Mirror
+<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/lambertian.PNG">
+Lambertian
 
 # external dependancy
 - cuda
