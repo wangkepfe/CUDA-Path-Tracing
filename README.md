@@ -1,28 +1,40 @@
 # features
 ### Specular reflection (Mirror)
 <img src="renderingResult/specularReflection.PNG">
+
 ### Lambertian (Matte)
 <img src="renderingResult/lambertian.PNG">
+
 ### Microfacet reflection (Plastic)
 <img src="renderingResult/microfacetRough.PNG">
+
 ### Microfacet reflection (Metal)
 <img src="renderingResult/microfacetReflection.PNG">
+
 ### Microfacet reflection (Brushed metal)
 <img src="renderingResult/microfacetAnisotropic01.PNG">
+
 ### Microfacet reflection (Brushed metal)
 <img src="renderingResult/microfacetAnisotropic02.PNG">
+
 ### Fresnel blend reflection (Substrate/Coated metal)
 <img src="renderingResult/fresnelBlend.PNG">
+
 ### Specular transmission (Glass)
 <img src="renderingResult/specularGlass.PNG">
+
 ### Microfacet transmission (Frosted glass)
 <img src="renderingResult/roughGlass.PNG">
+
 ### Medium no surface (Smoke)
 <img src="renderingResult/mediumSmoke.PNG">
+
 ### Medium high absorption (Tea)
 <img src="renderingResult/mediumTea.PNG">
+
 ### Medium high scattering (Milk)
 <img src="renderingResult/mediumMilk.PNG">
+
 ### Medium (Jade)
 <img src="renderingResult/mediumJade.PNG">
 
