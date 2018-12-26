@@ -1,8 +1,30 @@
 # features
-<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/specularReflection.PNG">
-Mirror
-<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/lambertian.PNG">
-Lambertian
+### Specular reflection (Mirror)
+<img src="renderingResult/specularReflection.PNG">
+### Lambertian (Matte)
+<img src="renderingResult/lambertian.PNG">
+### Microfacet reflection (Plastic)
+<img src="renderingResult/microfacetRough.PNG">
+### Microfacet reflection (Metal)
+<img src="renderingResult/microfacetReflection.PNG">
+### Microfacet reflection (Brushed metal)
+<img src="renderingResult/microfacetAnisotropic01.PNG">
+### Microfacet reflection (Brushed metal)
+<img src="renderingResult/microfacetAnisotropic02.PNG">
+### Fresnel blend reflection (Substrate/Coated metal)
+<img src="renderingResult/fresnelBlend.PNG">
+### Specular transmission (Glass)
+<img src="renderingResult/specularGlass.PNG">
+### Microfacet transmission (Frosted glass)
+<img src="renderingResult/roughGlass.PNG">
+### Medium (Smoke)
+<img src="renderingResult/mediumSmoke.PNG">
+### Medium (Tea)
+<img src="renderingResult/mediumTea.PNG">
+### Medium (Milk)
+<img src="renderingResult/mediumMilk.PNG">
+### Medium (Jade)
+<img src="renderingResult/mediumJade.PNG">
 
 # external dependancy
 - cuda
