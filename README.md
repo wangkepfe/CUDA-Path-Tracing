@@ -1,12 +1,13 @@
+# features
+![alt text](https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/specularReflection.PNG "picture")
+*Mirror*
+![alt text](https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/lambertian.PNG "picture")
+*Lambertian*
+
 # external dependancy
 - cuda
 - glut
 - glew
-
-# note
-Scene file, texture files, materials are all hardcoded
-
-user interaction with mouse and keyboards
 
 # reference
 
