@@ -52,7 +52,7 @@
 - Volumn scattering
 - Camera effects
 
-# reference
+# References
 
 framework based on Matching Socks CUDA path tracer by Samuel Lapere, 2016 https://raytracey.blogspot.com
 
