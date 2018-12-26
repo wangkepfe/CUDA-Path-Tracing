@@ -61,11 +61,13 @@ enum Refl_t {
 	MAT_DIFF, 
 	MAT_GLASS, 
 	MAT_REFL, 
+	MAT_DIFF_REFL,
+	MAT_FRESNEL,
 	MAT_NO, 
 	MAT_MEDIUM 
 };  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
-enum Medium_t {MEDIUM_NO = -1, MEDIUM_TEST = 0};
+enum Medium_t {MEDIUM_NO = -1, MEDIUM_CLOUD = 0, MEDIUM_TEA, MEDIUM_MILK, MEDIUM_JADE };
 
 // geometry, material
 struct Ray {
@@ -100,6 +102,8 @@ struct GroundPlane {
 };
 
 struct MediumSS {
+	__device__ MediumSS(){}
+	__device__ MediumSS(const Vec3f& sigmaS, const Vec3f& sigmaA, float g) : sigmaS{sigmaS}, sigmaA{sigmaA}, g{g} {}
 	Vec3f sigmaS;
 	Vec3f sigmaA;
 	float g;
@@ -459,7 +463,6 @@ __device__ Vec3f renderKernel(
 	float alphay;
 	float kd;
 	float ks;
-	bool fresnelBlend;
 	float etaT;
 	bool useTexture;
 	bool useNormal;
@@ -473,8 +476,8 @@ __device__ Vec3f renderKernel(
 	
 	// medium
 	const int airMedium = MEDIUM_NO;
-	int medium;
-	int objMedium;
+	int medium = MEDIUM_NO;
+	int objMedium = MEDIUM_NO;
 
 	for (int bounces = 0; 
 		#if USE_RUSSIAN == true
@@ -493,13 +496,12 @@ __device__ Vec3f renderKernel(
 
 			// material
 			refltype = MAT_DIFF;
-			objcol = Vec3f(0.8f, 0.8f, 0.8f);
+			objcol = Vec3f(1.0f, 1.0f, 1.0f);
 			emit = Vec3f(0.0f, 0.0f, 0.0f);
 			alphax = 0.0f;
 			alphay = 0.0f;
-			kd = 0.5f;
-			ks = 0.5f;
-			fresnelBlend = false;
+			kd = 1.0f;
+			ks = 1.0f;
 			etaT = 1.4f;
 			useTexture = false;
 			useNormal = true;
@@ -509,10 +511,6 @@ __device__ Vec3f renderKernel(
 			//Vec3f F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
 			F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
 			tangent = Vec3f(0.0f, 1.0f, -1.0f);
-
-			// medium
-			medium = MEDIUM_NO;
-			objMedium = MEDIUM_NO;
 		}
 		
 		// ------------------------ scene interaction ----------------------------
@@ -529,26 +527,6 @@ __device__ Vec3f renderKernel(
 		if (hitDistance < sceneT && hitDistance > RAY_MIN) { // triangle hit
 			sceneT = hitDistance;
 			n = trinormal;
-		}
-
-		// participating media
-		if (medium != MEDIUM_NO) {
-			MediumSS med {{0.74 * 30, 0.88 * 30, 1.01 * 30}, {0.032, 0.17, 0.48}, 0.5f};
-			bool sampledMedium;
-			HomogeneousMedium(
-				curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate),
-				mask,
-				med.getSigmaT(), med.sigmaS, med.g,
-				sceneT,
-				rayorig, raydir,
-				hitpoint, nextdir,
-				sampledMedium
-			);
-			if (sampledMedium) {
-				rayorig = hitpoint;
-				raydir = nextdir;
-				continue;
-			}
 		}
 
 		// environmental sphere
@@ -569,8 +547,27 @@ __device__ Vec3f renderKernel(
 			}
 			
 
-			accucolor += (mask * emit); 
+			accucolor += mask * emit * 1.5f; 
 			return accucolor; 
+		}
+
+		// participating media
+		if (medium != MEDIUM_NO) {
+			MediumSS med;
+			if      (medium == MEDIUM_CLOUD) { med = MediumSS(Vec3f{20.0f, 20.0f, 20.0f}, Vec3f{5.0f, 5.0f, 5.0f}, 0.0f); }
+			else if (medium == MEDIUM_TEA)   { med = MediumSS(Vec3f{0.040224f, 0.045264f, 0.051081f} * 5.0f, Vec3f{2.4288f, 4.5757f, 7.2127f}, 0.5f); }
+			else if (medium == MEDIUM_MILK)  { med = MediumSS(Vec3f{4.5513f, 5.8294f, 7.136f} * 20.0f, Vec3f{0.0015333f, 0.0046f, 0.019933f}, -0.5f); }
+			else if (medium == MEDIUM_JADE)  { med = MediumSS(Vec3f{45.0f, 40.0f, 50.0f}, Vec3f{10.0f, 5.0f, 15.0f}, 0.2f); }
+			bool sampledMedium;
+			HomogeneousMedium(
+				curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate),
+				mask, med.getSigmaT(), med.sigmaS, med.g, sceneT, rayorig, raydir, hitpoint, nextdir, sampledMedium
+			);
+			if (sampledMedium) {
+				rayorig = hitpoint;
+				raydir = nextdir;
+				continue;
+			}
 		}
 
 		// ---------------------- triangle interaction ----------------------
@@ -609,37 +606,105 @@ __device__ Vec3f renderKernel(
 
 			// scene material user setting
 			int sceneTestIdx = 0;
-			if (userSetting->testMaterialIdx == ++sceneTestIdx) 
+			// 1
+			if (userSetting->testMaterialIdx == ++sceneTestIdx) // diffuse + microfacet reflection
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_DIFF_REFL; alphax = 0.1f; alphay = 0.1f; objcol = Vec3f(1.0f, 0.5f, 0.3f); F0 = Vec3f(0.03f); } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_DIFF_REFL; alphax = 0.1f; alphay = 0.1f; objcol = Vec3f(0.57f, 0.43f, 0.85f); F0 = Vec3f(0.03f); } // outer
+			}  
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // microfacet reflection
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
 				else if (materialId == 1) { refltype = MAT_REFL; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
-				else if (materialId == 3) { refltype = MAT_EMIT; emit = Vec3f(1.0, 1.0, 1.0); } // light
-				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.1f; alphay = 0.1f; } // outer
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.05f; alphay = 0.05f; kd = 0.0f; } // outer
 			} 
-			else if (userSetting->testMaterialIdx == ++sceneTestIdx) 
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // microfacet reflection anisotropic 1
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
 				else if (materialId == 1) { refltype = MAT_REFL; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
-				else if (materialId == 3) { refltype = MAT_EMIT; emit = Vec3f(1.0, 1.0, 1.0); } // light
-				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.1f; alphay = 0.1f; fresnelBlend = true; } // outer
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.01f; alphay = 0.5f; kd = 0.0f; } // outer
 			} 
-			else if (userSetting->testMaterialIdx == ++sceneTestIdx) 
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // microfacet reflection anisotropic 2
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
 				else if (materialId == 1) { refltype = MAT_REFL; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
-				else if (materialId == 3) { refltype = MAT_EMIT; emit = Vec3f(1.0, 1.0, 1.0); } // light
-				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.1f; alphay = 0.1f; kd = 0.0f; ks = 1.0f; } // outer
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_REFL; alphax = 0.5f; alphay = 0.01f; kd = 0.0f; } // outer
 			} 
-			else
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // smooth glass
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL;  objcol = Vec3f(0.57f, 0.43f, 0.85f); } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_GLASS; } // outer
+			} 
+			// 6
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // rough glass
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; alphax = 0.05f; alphay = 0.05f; objcol = Vec3f(0.57f, 0.43f, 0.85f); } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_GLASS; alphax = 0.05f; } // outer
+			} 
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // substrate/fresnelBlend/coat
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; alphax = 0.01f; alphay = 0.01f; } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_FRESNEL; alphax = 0.01f; kd = 20.0f; objcol = Vec3f(0.4f, 0.03f, 0.03f); F0 = Vec3f(0.3f); } // outer
+			}
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(gas)
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; alphax = 0.01f; alphay = 0.01f; objcol = F0 = Vec3f(1.00f, 0.71f, 0.29f); } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_MEDIUM; objMedium = MEDIUM_CLOUD; } // outer
+			}
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(liquid, tea)
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_GLASS; objMedium = MEDIUM_TEA; } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_GLASS; } // outer
+			}
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(liquid, tea)
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_GLASS; objMedium = MEDIUM_MILK; } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_GLASS; } // outer
+			}
+			// 11
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(solid)
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; alphax = 0.01f; alphay = 0.01f; objcol = F0 = Vec3f(1.0f, 0.7f, 0.3f); } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; } // light
+				else if (materialId == 4) { refltype = MAT_GLASS; objMedium = MEDIUM_JADE; alphax = 0.01f; } // outer
+			} 
+			// 0
+			else // lambertian reflection
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF;    useTexture = true;          } // ground
-				else if (materialId == 1) { refltype = MAT_DIFF;    useTexture = true;          } // inner
-				else if (materialId == 2) { refltype = MAT_DIFF;    useTexture = true;          } // ground label
-				else if (materialId == 3) { refltype = MAT_DIFF;    useTexture = true;          } // light
-				else if (materialId == 4) { refltype = MAT_DIFF;    useTexture = true;          } // outer
+				else if (materialId == 1) { refltype = MAT_DIFF;    objcol = Vec3f(0.75f, 0.75f, 0.75f);          } // inner
+				else if (materialId == 2) { refltype = MAT_DIFF;    objcol = Vec3f(0.75f, 0.75f, 0.75f);          } // ground label
+				else if (materialId == 3) { refltype = MAT_DIFF;    objcol = Vec3f(0.75f, 0.75f, 0.75f);          } // light
+				else if (materialId == 4) { refltype = MAT_DIFF;    objcol = Vec3f(0.75f, 0.75f, 0.75f);          } // outer
 			}
 
 			if (userSetting->testTexture && useTexture) { objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z); } 
@@ -659,36 +724,56 @@ __device__ Vec3f renderKernel(
 			case MAT_DIFF: {
 				lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
 				hitpoint += nl * RAY_MIN;
-				mask *= objcol;
+				mask *= kd * objcol;
 				break;
 			}
 			case MAT_REFL: {
-				if (alphax == 0.0f) { // perfect reflection
+				if (alphax == 0.0f) { 
+					// perfect mirror reflection
 					nextdir = raydir - n * dot(n, raydir) * 2.0f;
 					nextdir.normalize();
 					hitpoint += nl * RAY_MIN;
-					mask *= objcol;
-				} else { // microfacet reflection
-					if (fresnelBlend) { // use fresnel blend diffuse and specular
-						//if (curand_uniform(randstate) < fresnel(F0[0], dot(-nl, raydir.normalized()))) {
-						if (curand_uniform(randstate) < fresnelDielectric(dot(-nl, raydir.normalized()), 1.0f, etaT)) {
-							macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), 
-								raydir, nextdir, nl, tangent, 
-								beta, F0,
-								alphax, alphay, kd, ks);
-							mask *= beta;
-						} else {
-							lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
-							mask *= objcol;
-						}
-					} else { // directly mix diffuse and specular
-						macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), 
-							raydir, nextdir, nl, tangent, 
-							beta, F0,
-							alphax, alphay, kd, ks);
-						mask *= kd * objcol + ks * beta;
-					}
-					hitpoint += nl * RAY_MIN;
+					mask *= ks * objcol;
+				} else { 
+					// microfacet reflection
+					macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, tangent, beta, F0, alphax, alphay);
+					mask *= ks * beta * objcol;
+				}
+				hitpoint += nl * RAY_MIN;
+				break;
+			}
+			case MAT_DIFF_REFL: {
+				// blend diffuse and reflection
+				if (curand_uniform(randstate) < 0.5f) {
+					// reflection
+					macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, tangent, beta, F0, alphax, alphay);
+					mask *= ks * beta * objcol;
+				} else {
+					// diffuse
+					lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
+					mask *= kd * objcol;
+				}
+				break;
+			}
+			case MAT_FRESNEL: {
+				fresnelBlend(curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, beta, kd * objcol, F0, alphax);
+				mask *= beta;
+				break;
+			}
+			case MAT_GLASS: {
+				if (alphax == 0.0f) { 
+					// perfect specular glass
+					bool refl;
+					specularGlass(curand_uniform(randstate), into, raydir, nextdir, nl, refl, etaT);
+					hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
+					if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
+				} else {
+					// microfacet glass
+					bool refl;
+					macrofacetGlass(curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), into, beta, raydir, nextdir, nl, refl, etaT, alphax);
+					hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
+					mask *= beta;
+					if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
 				}
 				break;
 			}
@@ -705,39 +790,6 @@ __device__ Vec3f renderKernel(
 				nextdir = raydir; hitpoint -= nl * RAY_MIN;
 			}
 		}
-		
-		// else if (refltype == MAT_GLASS) {
-		// 	bool refl;
-		// 	specularGlass(curand_uniform(randstate), into, raydir, nextdir, nl, refl, etaT);
-		// 	hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
-		// 	if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
-		// 	// if (!refl) mask *= objcol;
-		// } else if (refltype == MAT_NO) {
-		// 	
-		// 	
-		// } else if (refltype == ) {
-		// 	
-		// } else if (refltype == MAT_PLASTIC) {
-		// 	float roughness = userSetting->testMaterialParam0;
-		// 	float kd = userSetting->testMaterialParam1;
-		// 	float ks = userSetting->testMaterialParam2;
-		// 	macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, objcol, mask, roughness, kd, ks);
-		// 	hitpoint += nl * RAY_MIN;
-		// } else if (refltype == MAT_BRUSH_METAL) {
-		// 	float alphax = 0.05;
-		// 	float alphay = 0.8f;
-		// 	float kd = 0.5f;
-		// 	float ks = 0.5f;
-		// 	Vec3f tangent = Vec3f(0.0f, 1.0f, -1.0f);
-		// 	macrofacetReflectionAnisotropic(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, tangent, objcol, mask, alphax, alphay, kd, ks);
-		// 	hitpoint += nl * RAY_MIN;
-		// } else if (refltype == MAT_ROUGH_GLASS) {
-		// 	bool refl;
-		// 	float alpha = 0.1f;
-		// 	roughGlass(curand_uniform(randstate), curand_uniform(randstate), curand_uniform(randstate), into, raydir, nextdir, nl, refl, etaT, alpha);
-		// 	hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
-		// 	// if (!refl) mask *= objcol;
-		// }
 
 		rayorig = hitpoint; 
 		raydir = nextdir; 
