@@ -5,8 +5,8 @@
 ### Lambertian (Matte)
 <img src="renderingResult/lambertian.PNG">
 
-### Microfacet reflection (Plastic)
-<img src="renderingResult/microfacetRough.PNG">
+### Lambertian + Microfacet reflection (Plastic)
+<img src="renderingResult/plastic.PNG">
 
 ### Microfacet reflection (Metal)
 <img src="renderingResult/microfacetReflection.PNG">

@@ -610,10 +610,10 @@ __device__ Vec3f renderKernel(
 			if (userSetting->testMaterialIdx == ++sceneTestIdx) // diffuse + microfacet reflection
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
-				else if (materialId == 1) { refltype = MAT_DIFF_REFL; alphax = 0.1f; alphay = 0.1f; objcol = Vec3f(1.0f, 0.5f, 0.3f); F0 = Vec3f(0.03f); } // inner
+				else if (materialId == 1) { refltype = MAT_DIFF_REFL; alphax = 0.05f; alphay = 0.05f; objcol = Vec3f(1.0f, 0.5f, 0.3f); F0 = Vec3f(0.04f); ks = 0.7f; kd = 0.3f; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
 				else if (materialId == 3) { refltype = MAT_NO; } // light
-				else if (materialId == 4) { refltype = MAT_DIFF_REFL; alphax = 0.1f; alphay = 0.1f; objcol = Vec3f(0.57f, 0.43f, 0.85f); F0 = Vec3f(0.03f); } // outer
+				else if (materialId == 4) { refltype = MAT_DIFF_REFL; alphax = 0.05f; alphay = 0.05f; objcol = Vec3f(0.57f, 0.43f, 0.85f); F0 = Vec3f(0.04f); ks = 0.7f; kd = 0.3f; } // outer
 			}  
 			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // microfacet reflection
 			{
@@ -744,14 +744,14 @@ __device__ Vec3f renderKernel(
 			}
 			case MAT_DIFF_REFL: {
 				// blend diffuse and reflection
-				if (curand_uniform(randstate) < 0.5f) {
+				if (curand_uniform(randstate) < ks / (ks + kd)) {
 					// reflection
 					macrofacetReflection(curand_uniform(randstate), curand_uniform(randstate), raydir, nextdir, nl, tangent, beta, F0, alphax, alphay);
-					mask *= ks * beta * objcol;
+					mask *= beta;
 				} else {
 					// diffuse
 					lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
-					mask *= kd * objcol;
+					mask *= objcol;
 				}
 				break;
 			}
