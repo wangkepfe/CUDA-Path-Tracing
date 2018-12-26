@@ -17,11 +17,11 @@
 <img src="renderingResult/specularGlass.PNG">
 ### Microfacet transmission (Frosted glass)
 <img src="renderingResult/roughGlass.PNG">
-### Medium (Smoke)
+### Medium no surface (Smoke)
 <img src="renderingResult/mediumSmoke.PNG">
-### Medium (Tea)
+### Medium high absorption (Tea)
 <img src="renderingResult/mediumTea.PNG">
-### Medium (Milk)
+### Medium high scattering (Milk)
 <img src="renderingResult/mediumMilk.PNG">
 ### Medium (Jade)
 <img src="renderingResult/mediumJade.PNG">
