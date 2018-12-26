@@ -1,7 +1,7 @@
 # features
-<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/specularReflection.PNG">
+<img src="renderingResult/specularReflection.PNG">
 Mirror
-<img src="https://github.com/wangkepfe/CUDA-Path-Tracing/blob/master/renderingResult/lambertian.PNG">
+<img src="renderingResult/lambertian.PNG">
 Lambertian
 
 # external dependancy
