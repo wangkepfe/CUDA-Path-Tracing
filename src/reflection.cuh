@@ -384,5 +384,3 @@ __device__ inline void fresnelBlend (
     // beta
     beta = f * cosThetaWi / pdf;
 }
-
-// ---------------------------------------- bssrdf -----------------------------------------------

@@ -26,6 +26,9 @@
 // hdr
 #include "HDRloader.h"
 
+// bssrdf
+#include "bssrdf.h"
+
 // camera and input control
 #include "MouseKeyboardInput.h"
 #include "Camera.h"
@@ -83,6 +86,15 @@ Vec3f *finaloutputbuffer = NULL; // stores averaged pixel samples
 // hdr env map
 cudaArray *gpuHDRenv = NULL;
 Vec4f *cpuHDRenv = NULL;
+
+// bssrdf
+int bssrdfRhoNum = 0;
+int bssrdfRadiusNum = 0;
+float *bssrdfRho = NULL;
+float *bssrdfRadius = NULL;
+float *bssrdfProfile = NULL;
+float *bssrdfProfileCDF = NULL;
+float *bssrdfRhoEff = NULL;
 
 // texture
 float4* cpuTextureBuffer = NULL;
@@ -338,6 +350,43 @@ void initHDR()
 	delete cpuHDRenv;
 }
 
+void initBssrdfTable() 
+{
+	// int bssrdfRhoNum = 0;
+	// int bssrdfRadiusNum = 0;
+	// float *bssrdfRho = NULL;
+	// float *bssrdfRadius = NULL;
+	// float *bssrdfProfile = NULL;
+	// float *bssrdfProfileCDF = NULL;
+	// float *bssrdfRhoEff = NULL;
+
+	bssrdfRhoNum = 100;
+	bssrdfRadiusNum = 64;
+
+	BssrdfTable table(bssrdfRhoNum, bssrdfRadiusNum);
+	ComputeBeamDiffusionBSSRDF(0, 1.4f, &table);
+
+	// std::unique_ptr<float[]> rhoSamples;
+    // std::unique_ptr<float[]> radiusSamples;
+    // std::unique_ptr<float[]> profile;
+    // std::unique_ptr<float[]> rhoEff;
+    // std::unique_ptr<float[]> profileCDF;
+
+	cudaMalloc((void **)&bssrdfRho,        bssrdfRhoNum * sizeof(float));
+	cudaMalloc((void **)&bssrdfRadius,     bssrdfRadiusNum * sizeof(float));
+	cudaMalloc((void **)&bssrdfProfile,    bssrdfRhoNum * bssrdfRadiusNum * sizeof(float));
+	cudaMalloc((void **)&bssrdfProfileCDF, bssrdfRhoNum * bssrdfRadiusNum * sizeof(float));
+	cudaMalloc((void **)&bssrdfRhoEff,     bssrdfRhoNum * sizeof(float));
+
+	cudaMemcpy(bssrdfRho,        table.rhoSamples.get(),    bssrdfRhoNum * sizeof(float),                   cudaMemcpyHostToDevice);
+	cudaMemcpy(bssrdfRadius,     table.radiusSamples.get(), bssrdfRadiusNum * sizeof(float),                cudaMemcpyHostToDevice);
+	cudaMemcpy(bssrdfProfile,    table.profile.get(),       bssrdfRhoNum * bssrdfRadiusNum * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(bssrdfProfileCDF, table.profileCDF.get(),    bssrdfRhoNum * bssrdfRadiusNum * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(bssrdfRhoEff,     table.rhoEff.get(),        bssrdfRhoNum * sizeof(float),                   cudaMemcpyHostToDevice);
+
+	std::cout << "BSSRDF table sent to GPU\n";
+}
+
 // cuda memory alloc and copy to gpu
 void initCUDAscenedata()
 {
@@ -492,6 +541,12 @@ void deleteCudaAndCpuMemory()
 	cudaFreeArray(gpuHDRenv);
 	cudaFreeArray(gpuTextureArray);
 
+	cudaFree(bssrdfRho);
+	cudaFree(bssrdfRadius);
+	cudaFree(bssrdfProfile);
+	cudaFree(bssrdfProfileCDF);
+	cudaFree(bssrdfRhoEff);
+
 	// release CPU memory
 	free(cpuNodePtr);
 	free(cpuTriWoopPtr);
@@ -499,8 +554,8 @@ void deleteCudaAndCpuMemory()
 	free(cpuTriIndicesPtr);
 	free(cpuUvPtr);
 	free(cpuNormalPtr);
-	delete cpuMaterialPtr;
 
+	delete cpuMaterialPtr;
 	delete hostRendercam;
 	delete interactiveCamera;
 	delete gpuBVH;
@@ -540,6 +595,7 @@ int main(int argc, char **argv)
 	initCUDAscenedata(); // copy scene data to the GPU, ready to be used by CUDA
 	initHDR();			 // initialise the HDR environment map
 	initTexture();
+	initBssrdfTable();
 
 	// initialise GLUT
 	glutInit(&argc, argv);

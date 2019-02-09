@@ -13,7 +13,7 @@ InteractiveCamera::InteractiveCamera()
 	pitch = 0.3;
 	radius = 5;
 	apertureRadius = 0.0; 
-	focalDistance = 5.0f;
+	focalDistance = 1.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);  
 	fov = Vec2f(40, 40);
