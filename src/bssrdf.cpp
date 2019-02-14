@@ -169,7 +169,7 @@ void ComputeBeamDiffusionBSSRDF(float g, float eta, BssrdfTable *t) {
     t->radiusSamples[0] = 0;
     t->radiusSamples[1] = 2.5e-3f; // first step 0.0025
     for (int i = 2; i < t->nRadiusSamples; ++i) {
-        t->radiusSamples[i] = t->radiusSamples[i - 1] * 1.2f; // each step 1.2x
+        t->radiusSamples[i] = t->radiusSamples[i - 1] * 1.2f; // each step
     }
 
     // albedo values

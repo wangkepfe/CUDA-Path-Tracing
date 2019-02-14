@@ -269,6 +269,61 @@ __device__ inline void macrofacetReflection (
     beta = minf3f(1.0f, F * G * cosThetaWoWh / cosThetaWi / cosThetaWh);
 }
 
+__device__ inline void microfacetSampling(
+    float r1, float r2, bool into, 
+    Vec3f& raydir, Vec3f& normal, bool& refl, 
+    float etaT, float alpha, 
+    Vec3f &sampledNormal, Vec3f& beta, Vec3f &nextdir
+) {
+    // sample normal
+    float alpha2 = alpha * alpha;
+    float cosTheta = 1.0f / sqrt(1.0f + alpha2 * r1 / (1.0f - r1));
+    float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    float phi = TWO_PI * r2;
+    Vec3f sampledNormalLocal = Vec3f(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+
+    // local to world space
+    Vec3f tangent, bitangent;
+    localizeSample(normal, tangent, bitangent);
+    sampledNormal = sampledNormalLocal.x * tangent + sampledNormalLocal.z * bitangent + sampledNormalLocal.y * normal;
+    sampledNormal.normalize();
+
+    // Fresnel for dialectric
+    const float etaI = 1.0f;
+    const float eta = into ? etaI/etaT : etaT/etaI;
+
+    float cosThetaI = abs(dot(sampledNormal, raydir));
+    float sin2ThetaI = max(float(0), float(1.0f - cosThetaI * cosThetaI));
+    float sin2ThetaT = eta * eta * sin2ThetaI; // Snell's law
+    // float cosThetaT = sqrt(max(0.0f, 1.0f - sin2ThetaT));
+    // float R1 = etaT * cosThetaI, R2 = etaI * cosThetaT;
+    // float R3 = etaI * cosThetaI, R4 = etaT * cosThetaT;
+    // float Rparl = (R1 - R2) / (R1 + R2);
+    // float Rperp = (R3 - R4) / (R3 + R4);
+    // float fresnel = (Rparl * Rparl + Rperp * Rperp) / 2;
+    float fresnel = fresnelShlick(0.03f, cosThetaI);
+
+    // total internal reflection, fresnel decide transmission or reflection
+    refl = sin2ThetaT >= 1 || (sin2ThetaT < 1 && r1 < fresnel);
+
+    if (refl) {
+        nextdir = raydir - sampledNormal * 2.0f * dot(sampledNormal, raydir);
+    } else {
+        return;
+    }
+    nextdir.normalize();
+
+    // Smith's Mask-shadowing function G
+    float cosThetaWo = abs(dot(nextdir, normal));
+    float cosThetaWi = max(0.01f, abs(dot(raydir, normal)));
+    float tanThetaWo = sqrt(1.0f - cosThetaWo * cosThetaWo) / cosThetaWo;
+    float G = 1.0f / (1.0f + (sqrtf(1.0f + alpha2 * tanThetaWo * tanThetaWo) - 1.0f) / 2.0f);
+
+    // color
+    float cosThetaWh = max(0.01f, dot(sampledNormal, normal));
+    beta = minf3f(1.0f, G * cosThetaI / cosThetaWi / cosThetaWh);
+}
+
 __device__ inline void macrofacetGlass (
     float r1, float r2, float r3,
     bool into,
@@ -305,7 +360,7 @@ __device__ inline void macrofacetGlass (
     float R3 = etaI * cosThetaI, R4 = etaT * cosThetaT;
     float Rparl = (R1 - R2) / (R1 + R2);
     float Rperp = (R3 - R4) / (R3 + R4);
-    float fresnel = (Rparl * Rparl + Rperp * Rperp) / 2;
+    float fresnel = (Rparl * Rparl + Rperp * Rperp) / 2;        
 
     // total internal reflection, fresnel decide transmission or reflection
     refl = sin2ThetaT >= 1 || (sin2ThetaT < 1 && r1 < fresnel);
@@ -332,7 +387,7 @@ __device__ inline void fresnelBlend (
     float r1, float r2, float r3,
     Vec3f& raydir, Vec3f& nextdir, Vec3f& normal,
     Vec3f& beta, 
-    Vec3f& Rd, Vec3f& Rs, float alpha) 
+    Vec3f Rd, Vec3f& Rs, float alpha) 
 {
     float alpha2 = alpha * alpha;
     Vec3f wh;

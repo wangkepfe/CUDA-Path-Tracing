@@ -14,7 +14,7 @@ SRC_DIR=src
 SRC=$(wildcard ${SRC_DIR}/*.cpp ${SRC_DIR}/*.cc ${SRC_DIR}/*.cu)
 # -----------------------------------------------
 COMPILER=nvcc
-FLAGS=${OUT_FLAGS} ${INC_FLAGS} ${LIB_FLAGS}
+FLAGS=--expt-extended-lambda ${OUT_FLAGS} ${INC_FLAGS} ${LIB_FLAGS}
 # -----------------------------------------------
 all: ${EXE}
 

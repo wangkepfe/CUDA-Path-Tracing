@@ -30,6 +30,7 @@
 
 // material modeling
 #include "reflection.cuh"
+#include "bssrdf.cuh"
 
 // ******************* macro define ********************
 
@@ -50,8 +51,8 @@
 // sampling settings
 #define NUM_SAMPLE 1
 #define USE_RUSSIAN false
-#define RUSSIAN_P 0.98
-#define LIGHT_BOUNCE 80
+#define RUSSIAN_P 0.9
+#define LIGHT_BOUNCE 8
 
 // ******************* structures ********************
 
@@ -64,7 +65,9 @@ enum Refl_t {
 	MAT_DIFF_REFL,
 	MAT_FRESNEL,
 	MAT_NO, 
-	MAT_MEDIUM 
+	MAT_MEDIUM,
+	MAT_SUBSURFACE,
+	MAT_SKIN,
 };  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
 enum Medium_t {MEDIUM_NO = -1, MEDIUM_CLOUD = 0, MEDIUM_TEA, MEDIUM_MILK, MEDIUM_JADE };
@@ -108,6 +111,8 @@ struct MediumSS {
 	Vec3f sigmaA;
 	float g;
 	__device__ Vec3f getSigmaT() { return sigmaA + sigmaS; }
+	__device__ Vec3f getRho() { return sigmaS / getSigmaT(); }
+	__device__ MediumSS& operator*(float scaleFactor) { sigmaS *= scaleFactor; sigmaA *= scaleFactor; return *this; };
 };
 
 // ******************* global variables ********************
@@ -142,6 +147,7 @@ __device__ __inline__ float fmax_fmax(float a, float b, float c) { return __int_
 __device__ __inline__ float spanBeginKepler(float a0, float a1, float b0, float b1, float c0, float c1, float d){ return fmax_fmax(fminf(a0, a1), fminf(b0, b1), fmin_fmax(c0, c1, d)); }
 __device__ __inline__ float spanEndKepler(float a0, float a1, float b0, float b1, float c0, float c1, float d)	{ return fmin_fmin(fmaxf(a0, a1), fmaxf(b0, b1), fmax_fmin(c0, c1, d)); }
 __device__ __inline__ void swap2(int& a, int& b){ int temp = a; a = b; b = temp;}
+__device__ __inline__ float rd(curandState* randstate) { return curand_uniform(randstate); }
 
 // ******************* functions ********************
 
@@ -439,7 +445,8 @@ __device__ Vec3f renderKernel(
 	curandState* randstate, 
 	Vec3f& rayorig, 
 	Vec3f& raydir, 
-	const Camera* userSetting) 
+	const Camera* userSetting,
+	BSSRDF& bssrdf) 
 {
 	// variables define
 
@@ -543,7 +550,7 @@ __device__ Vec3f renderKernel(
 			if (userSetting->testLighting) {
 				emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
 			} else {
-				emit = Vec3f(0.1f, 0.1f, 0.1f);
+				emit = Vec3f(0.0f, 0.0f, 0.0f);
 			}
 			
 
@@ -680,7 +687,7 @@ __device__ Vec3f renderKernel(
 				else if (materialId == 3) { refltype = MAT_NO; } // light
 				else if (materialId == 4) { refltype = MAT_GLASS; } // outer
 			}
-			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(liquid, tea)
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // media(liquid, milk)
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
 				else if (materialId == 1) { refltype = MAT_GLASS; objMedium = MEDIUM_MILK; } // inner
@@ -697,6 +704,22 @@ __device__ Vec3f renderKernel(
 				else if (materialId == 3) { refltype = MAT_NO; } // light
 				else if (materialId == 4) { refltype = MAT_GLASS; objMedium = MEDIUM_JADE; alphax = 0.01f; } // outer
 			} 
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // subsurface
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; /*refltype = MAT_EMIT; emit = Vec3f(2.0f, 2.0f, 2.0f);*/ } // light
+				else if (materialId == 4) { refltype = MAT_SUBSURFACE; } // outer
+			} 
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // subsurface
+			{
+				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
+				else if (materialId == 1) { refltype = MAT_REFL; } // inner
+				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
+				else if (materialId == 3) { refltype = MAT_NO; if(!userSetting->testLighting) {refltype = MAT_EMIT; emit = Vec3f(2.0f, 2.0f, 2.0f);} } // light
+				else if (materialId == 4) { refltype = MAT_SKIN; alphax = 0.1f; kd = 1.0f; ks = 1.0f; F0 = Vec3f(0.03f); } // outer
+			}
 			// 0
 			else // lambertian reflection
 			{
@@ -786,6 +809,142 @@ __device__ Vec3f renderKernel(
 				if (airMedium != objMedium) medium = (medium == airMedium) ? (!into ? airMedium : objMedium) : (!into ? objMedium : airMedium);
 				break;
 			}
+			case MAT_SUBSURFACE: {
+				//int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
+				// float scaleFactor = 300.0f;
+				// MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor; // skin 1
+				// //MediumSS med = MediumSS(Vec3f{0.18, 0.07, 0.03} * 50.0f, Vec3f{0.061, 0.97, 1.45} * 50.0f, 0.0f); // ketchup
+				// //MediumSS med = MediumSS(Vec3f{2.55, 3.21, 3.77} * 50.0f, Vec3f{0.0011, 0.0024, 0.014} * 50.0f, 0.0f); // Wholemilk
+				// //MediumSS med = MediumSS(Vec3f{4.5513f, 5.8294f, 7.136f} * 100.0f, Vec3f{0.0015333f, 0.0046f, 0.019933f} * 100.0f, 0.0f); // Wholemilk
+
+				// Vec3f probeRayOrig;
+				// Vec3f probeRayDir;
+				// float probeRayLength;  
+
+				// Vec3f sigmaT = med.getSigmaT();
+				// Vec3f rho = med.getRho();
+			
+				// // if (threadId == 460800) {
+				// // 	printf("\n\nEntering subsurface scattering kernel...\n");
+				// // 	printf("BSSRDF: sigmaT = (%f, %f, %f), rho = (%f, %f, %f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+				// // 	printf("BSSRDF: hitpoint = (%f, %f, %f), normal = (%f, %f, %f)\n", hitpoint.x, hitpoint.y, hitpoint.z, nl.x, nl.y, nl.z);
+				// // }
+
+				// float sampledRadius;
+				// sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, sampledRadius);
+
+				// // if (threadId == 460800) {
+				// // 	printf("BSSRDF: probeRayOrig = (%f, %f, %f), probeRayDir = (%f, %f, %f), probeRayLength = %f\n", 
+				// // 		probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, probeRayDir.x, probeRayDir.y, probeRayDir.z, probeRayLength);
+				// // }
+				
+				// intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), 
+				// 						make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  probeRayLength),
+				// 						hitTriAddr, hitDistance, trinormal, false);
+
+				// int originalIdx = tex1Dfetch(triIndicesTexture,  hitTriAddr);
+				// int materialId  = tex1Dfetch(triMaterialTexture, originalIdx);
+
+				// if (!(hitDistance < probeRayLength && hitDistance > RAY_MIN && (materialId == 4))) {
+				// 	// if (threadId == 460800) {
+				// 	// 	printf("BSSRDF: probe ray missed.\n");	
+				// 	// }
+				// 	break; // try again	
+				// }
+
+				// float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);      Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
+				// float4 po1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);  Vec3f p1 = Vec3f(po1.x, po1.y, po1.z);
+				// float4 po2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);  Vec3f p2 = Vec3f(po2.x, po2.y, po2.z);
+
+				// float4 normal0 = tex1Dfetch(triNormalTexture, hitTriAddr);     Vec3f n0 = Vec3f(normal0.x, normal0.y, normal0.z);
+				// float4 normal1 = tex1Dfetch(triNormalTexture, hitTriAddr + 1); Vec3f n1 = Vec3f(normal1.x, normal1.y, normal1.z);
+				// float4 normal2 = tex1Dfetch(triNormalTexture, hitTriAddr + 2); Vec3f n2 = Vec3f(normal2.x, normal2.y, normal2.z);
+
+				// // normal
+				// float u, v, w;
+				// Barycentric(hitpoint, p0, p1, p2, u, v, w);
+				// Vec3f smoothNormal = n0 * u + n1 * v + n2 * w;
+				// smoothNormal.normalize();
+
+				// // next point
+				// Vec3f nextPoint = probeRayOrig + probeRayDir * hitDistance;
+
+				// // if (threadId == 460800) {
+				// // 	printf("BSSRDF: probe ray hit. nextPoint = (%f, %f, %f), normal = (%f, %f, %f), distance = %f\n", 
+				// // 		nextPoint.x, nextPoint.y, nextPoint.z, smoothNormal.x, smoothNormal.y, smoothNormal.z, (nextPoint - hitpoint).length());
+				// // }
+
+				// lambertianReflection(rd(randstate), rd(randstate), nextdir, smoothNormal);
+				// calculateBSSRDF(nl, smoothNormal, nextdir, sigmaT, rho, etaT, beta, bssrdf, sampledRadius, (nextPoint - hitpoint).length());
+				// mask *= beta;
+
+				// // if (threadId == 460800) {
+				// // 	printf("BSSRDF: nextdir = (%f, %f, %f), beta = (%f, %f, %f)\n\n", 
+				// // 		nextdir.x, nextdir.y, nextdir.z, beta.x, beta.y, beta.z);
+				// // }
+
+				// hitpoint = nextPoint + RAY_MIN * smoothNormal;
+			
+				break;
+			}
+			case MAT_SKIN: {
+				bool refl;
+				Vec3f sampledNormal;
+				microfacetSampling(rd(randstate), rd(randstate), into, raydir, nl, refl, etaT, alphax, sampledNormal, beta, nextdir);
+				if (refl) {
+					hitpoint += nl * RAY_MIN;
+					mask *= beta * ks;
+				} else {
+					float scaleFactor = 10.0f;
+					MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor; // skin 1
+					Vec3f sigmaT = med.getSigmaT();
+					Vec3f rho = med.getRho();
+					
+					Vec3f vx, vy;
+					localizeSample(nl, vx, vy);
+					SKIN_PROBE_TRY_AGAIN:;
+					int hitCount = 0;
+					Vec3f probeRayOrig, probeRayDir, probeHitPoint[5], probeHitPointNormal[5];
+					float probeRayLength;  
+					sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, vx, vy);
+					for (int i = 0; i < 5; ++i) {
+						intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  RAY_MAX), hitTriAddr, hitDistance, trinormal, false);
+						if (probeRayLength < hitDistance) {
+							break;
+						}
+						Vec3f probeHitPointAny = probeRayOrig + probeRayDir * hitDistance;
+						if (tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr)) == 4) {
+							probeHitPoint[hitCount] = probeHitPointAny;
+							probeHitPointNormal[hitCount] = trinormal;
+							++hitCount;
+						}
+						probeRayLength -= hitDistance;
+						probeRayOrig = probeHitPointAny + RAY_MIN * probeRayDir;
+					}
+					if (hitCount == 0) {
+						if (
+							#if USE_RUSSIAN == true
+							curand_uniform(randstate) < RUSSIAN_P && bounces < LIGHT_BOUNCE
+							#else
+							bounces < LIGHT_BOUNCE	
+							#endif
+						) {
+							++bounces;
+							goto SKIN_PROBE_TRY_AGAIN;
+						} else {
+							break;
+						}
+					}
+
+					int nextPointIdx = rd(randstate) * hitCount;
+					lambertianReflection(rd(randstate), rd(randstate), nextdir, probeHitPointNormal[nextPointIdx]);
+					calculateBSSRDF(nl, probeHitPointNormal[nextPointIdx], nextdir, sigmaT, rho, etaT, beta, bssrdf, probeHitPoint[nextPointIdx] - hitpoint, vx, vy);
+					mask *= beta * kd * hitCount;
+					hitpoint = probeHitPoint[nextPointIdx] + RAY_MIN * probeHitPointNormal[nextPointIdx];
+				}
+				break;
+			}
 			case MAT_NO: default: {
 				nextdir = raydir; hitpoint -= nl * RAY_MIN;
 			}
@@ -808,99 +967,94 @@ __global__ void pathTracingKernel(
 	Vec3f* accumbuffer, 
 	unsigned int framenumber, 
 	unsigned int hashedframenumber, 
-	const Camera* cudaRendercam)
+	const Camera* cudaRendercam,
+	BSSRDF bssrdf)
 {
-  // assign a CUDA thread to every pixel by using the threadIndex
-  unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
-  unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
+	// assign a CUDA thread to every pixel by using the threadIndex
+	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
+	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 
-  // global threadId, see richiesams blogspot
-  int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
-  //int pixelx = threadId % scrwidth; // pixel x-coordinate on screen
-  //int pixely = threadId / scrwidth; // pixel y-coordintate on screen
+	// global threadId, see richiesams blogspot
+	int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
-  // create random number generator and initialise with hashed frame number, see RichieSams blogspot
-  curandState randState; // state of the random number generator, to prevent repetition
-  curand_init(hashedframenumber + threadId, 0, 0, &randState);
+	// create random number generator and initialise with hashed frame number, see RichieSams blogspot
+	curandState randState; // state of the random number generator, to prevent repetition
+	curand_init(hashedframenumber + threadId, 0, 0, &randState);
 
-  Vec3f finalcol; // final pixel colour 
-  finalcol = Vec3f(0.0f, 0.0f, 0.0f); // reset colour to zero for every pixel	
-  //Vec3f rendercampos = Vec3f(0, 0.2, 4.6f); 
-  Vec3f rendercampos = Vec3f(cudaRendercam->position.x, cudaRendercam->position.y, cudaRendercam->position.z);
+	Vec3f finalcol; // final pixel colour 
+	finalcol = Vec3f(0.0f, 0.0f, 0.0f); // reset colour to zero for every pixel	
+	//Vec3f rendercampos = Vec3f(0, 0.2, 4.6f); 
+	Vec3f rendercampos = Vec3f(cudaRendercam->position.x, cudaRendercam->position.y, cudaRendercam->position.z);
 
-  int i = (scrheight - y - 1) * scrwidth + x; // pixel index in buffer	
-  int pixelx = x; // pixel x-coordinate on screen
-  int pixely = scrheight - y - 1; // pixel y-coordintate on screen
+	int i = (scrheight - y - 1) * scrwidth + x; // pixel index in buffer	
+	int pixelx = x; // pixel x-coordinate on screen
+	int pixely = scrheight - y - 1; // pixel y-coordintate on screen
 
-  Vec3f camdir = Vec3f(0, -0.042612, -1); camdir.normalize();
-  Vec3f cx = Vec3f(scrwidth * .5135f / scrheight, 0.0f, 0.0f);  // ray direction offset along X-axis 
-  Vec3f cy = (cross(cx, camdir)).normalize() * .5135f; // ray dir offset along Y-axis, .5135 is FOV angle
+	Vec3f camdir = Vec3f(0, -0.042612, -1); camdir.normalize();
+	Vec3f cx = Vec3f(scrwidth * .5135f / scrheight, 0.0f, 0.0f);  // ray direction offset along X-axis 
+	Vec3f cy = (cross(cx, camdir)).normalize() * .5135f; // ray dir offset along Y-axis, .5135 is FOV angle
 
-  for (int s = 0; s < NUM_SAMPLE; s++) {
+	for (int s = 0; s < NUM_SAMPLE; s++) {
 
-    // compute primary ray direction
-    // use camera view of current frame (transformed on CPU side) to create local orthonormal basis
-    Vec3f rendercamview = Vec3f(cudaRendercam->view.x, cudaRendercam->view.y, cudaRendercam->view.z); rendercamview.normalize(); // view is already supposed to be normalized, but normalize it explicitly just in case.
-    Vec3f rendercamup = Vec3f(cudaRendercam->up.x, cudaRendercam->up.y, cudaRendercam->up.z); rendercamup.normalize();
-    Vec3f horizontalAxis = cross(rendercamview, rendercamup); horizontalAxis.normalize(); // Important to normalize!
-    Vec3f verticalAxis = cross(horizontalAxis, rendercamview); verticalAxis.normalize(); // verticalAxis is normalized by default, but normalize it explicitly just for good measure.
+		// compute primary ray direction
+		// use camera view of current frame (transformed on CPU side) to create local orthonormal basis
+		Vec3f rendercamview = Vec3f(cudaRendercam->view.x, cudaRendercam->view.y, cudaRendercam->view.z); rendercamview.normalize(); // view is already supposed to be normalized, but normalize it explicitly just in case.
+		Vec3f rendercamup = Vec3f(cudaRendercam->up.x, cudaRendercam->up.y, cudaRendercam->up.z); rendercamup.normalize();
+		Vec3f horizontalAxis = cross(rendercamview, rendercamup); horizontalAxis.normalize(); // Important to normalize!
+		Vec3f verticalAxis = cross(horizontalAxis, rendercamview); verticalAxis.normalize(); // verticalAxis is normalized by default, but normalize it explicitly just for good measure.
 
-    Vec3f middle = rendercampos + rendercamview;
-    Vec3f horizontal = horizontalAxis * tanf(cudaRendercam->fov.x * 0.5 * (M_PI / 180)); // Treating FOV as the full FOV, not half, so multiplied by 0.5
-    Vec3f vertical = verticalAxis * tanf(-cudaRendercam->fov.y * 0.5 * (M_PI / 180)); // Treating FOV as the full FOV, not half, so multiplied by 0.5
+		Vec3f middle = rendercampos + rendercamview;
+		Vec3f horizontal = horizontalAxis * tanf(cudaRendercam->fov.x * 0.5 * (M_PI / 180)); // Treating FOV as the full FOV, not half, so multiplied by 0.5
+		Vec3f vertical = verticalAxis * tanf(-cudaRendercam->fov.y * 0.5 * (M_PI / 180)); // Treating FOV as the full FOV, not half, so multiplied by 0.5
 
-    // anti-aliasing
-    // calculate center of current pixel and add random number in X and Y dimension
-    // based on https://github.com/peterkutz/GPUPathTracer 
+		// anti-aliasing
+		// calculate center of current pixel and add random number in X and Y dimension
+		// based on https://github.com/peterkutz/GPUPathTracer 
 
-    float jitterValueX = curand_uniform(&randState) - 0.5;
-    float jitterValueY = curand_uniform(&randState) - 0.5;
-    float sx = (jitterValueX + pixelx) / (cudaRendercam->resolution.x - 1);
-    float sy = (jitterValueY + pixely) / (cudaRendercam->resolution.y - 1);
+		float jitterValueX = curand_uniform(&randState) - 0.5;
+		float jitterValueY = curand_uniform(&randState) - 0.5;
+		float sx = (jitterValueX + pixelx) / (cudaRendercam->resolution.x - 1);
+		float sy = (jitterValueY + pixely) / (cudaRendercam->resolution.y - 1);
 
-    // compute pixel on screen
-    Vec3f pointOnPlaneOneUnitAwayFromEye = middle + (horizontal * ((2 * sx) - 1)) + (vertical * ((2 * sy) - 1));
-    Vec3f pointOnImagePlane = rendercampos + ((pointOnPlaneOneUnitAwayFromEye - rendercampos) * cudaRendercam->focalDistance); // Important for depth of field!		
+		// compute pixel on screen
+		Vec3f pointOnPlaneOneUnitAwayFromEye = middle + (horizontal * ((2 * sx) - 1)) + (vertical * ((2 * sy) - 1));
+		Vec3f pointOnImagePlane = rendercampos + ((pointOnPlaneOneUnitAwayFromEye - rendercampos) * cudaRendercam->focalDistance); // Important for depth of field!		
 
-    // calculation of depth of field / camera aperture 
-    // based on https://github.com/peterkutz/GPUPathTracer 
+		// calculation of depth of field / camera aperture 
+		// based on https://github.com/peterkutz/GPUPathTracer 
 
-    Vec3f aperturePoint = Vec3f(0, 0, 0);
+		Vec3f aperturePoint = Vec3f(0, 0, 0);
 
-    if (cudaRendercam->apertureRadius > 0.00001) { // the small number is an epsilon value.
+		if (cudaRendercam->apertureRadius > 0.00001) { // the small number is an epsilon value.
 
-      // generate random numbers for sampling a point on the aperture
-      float random1 = curand_uniform(&randState);
-      float random2 = curand_uniform(&randState);
+			// generate random numbers for sampling a point on the aperture
+			float random1 = curand_uniform(&randState);
+			float random2 = curand_uniform(&randState);
 
-      // randomly pick a point on the circular aperture
-      float angle = TWO_PI * random1;
-      float distance = cudaRendercam->apertureRadius * sqrtf(random2);
-      float apertureX = cos(angle) * distance;
-      float apertureY = sin(angle) * distance;
+			// randomly pick a point on the circular aperture
+			float angle = TWO_PI * random1;
+			float distance = cudaRendercam->apertureRadius * sqrtf(random2);
+			float apertureX = cos(angle) * distance;
+			float apertureY = sin(angle) * distance;
 
-      aperturePoint = rendercampos + (horizontalAxis * apertureX) + (verticalAxis * apertureY);
+			aperturePoint = rendercampos + (horizontalAxis * apertureX) + (verticalAxis * apertureY);
 		}
 		else { // zero aperture
-      aperturePoint = rendercampos;
-    }
+			aperturePoint = rendercampos;
+		}
 
-    // calculate ray direction of next ray in path
-    Vec3f apertureToImagePlane = pointOnImagePlane - aperturePoint;
-    apertureToImagePlane.normalize(); // ray direction needs to be normalised
+		// calculate ray direction of next ray in path
+		Vec3f apertureToImagePlane = pointOnImagePlane - aperturePoint;
+		apertureToImagePlane.normalize(); // ray direction needs to be normalised
 
-    // ray direction
-    Vec3f rayInWorldSpace = apertureToImagePlane;
-    rayInWorldSpace.normalize();
+		// ray direction
+		Vec3f rayInWorldSpace = apertureToImagePlane;
+		rayInWorldSpace.normalize();
 
-    // ray origin
-    Vec3f originInWorldSpace = aperturePoint;
+		// ray origin
+		Vec3f originInWorldSpace = aperturePoint;
 
-    finalcol += renderKernel(
-		&randState, 
-        originInWorldSpace, 
-		rayInWorldSpace,
-		cudaRendercam) * (1.0f / NUM_SAMPLE);
+		finalcol += renderKernel(&randState, originInWorldSpace, rayInWorldSpace, cudaRendercam, bssrdf) * (1.0f / NUM_SAMPLE);
 	}
 
 	// add pixel colour to accumulation buffer (accumulates all samples) 
@@ -935,7 +1089,7 @@ __global__ void pathTracingKernel(
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
 	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
 	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr,
-	const float4 *cudaNormalPtr, const int *cudaMaterialPtr)
+	const float4 *cudaNormalPtr, const int *cudaMaterialPtr, BSSRDF bssrdf)
 {
 	static bool firstTime = true;
 
@@ -991,16 +1145,5 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 	dim3 threadsPerBlock (16, 16, 1);   // dim3 CUDA specific syntax, block and grid are required to schedule CUDA threads over streaming multiprocessors
 	dim3 fullBlocksPerGrid (scrwidth / threadsPerBlock.x, scrheight / threadsPerBlock.y, 1);
 
-	// Configure grid and block sizes:
-	// int threadsPerBlock = 256;
-	// Compute the number of blocks required, performing a ceiling operation to make sure there are enough:
-	// int fullBlocksPerGrid = ((scrwidth * scrheight) + threadsPerBlock - 1) / threadsPerBlock;
-	// <<<fullBlocksPerGrid, threadsPerBlock>>>
-	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>> (
-		outputbuf, 
-		accumbuf, 
-		framenumber, 
-		hashedframenumber, 
-		cudaRenderCam);  // texdata, texoffsets
-
+	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>> (outputbuf, accumbuf, framenumber, hashedframenumber, cudaRenderCam, bssrdf);
 }

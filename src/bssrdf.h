@@ -4,6 +4,7 @@
 #include <cmath>
 #include "mathDefine.h"
 
+// bssrdf table for cpu pre-calculation
 struct BssrdfTable {
     BssrdfTable(int nRhoSamples, int nRadiusSamples);
 

@@ -39,6 +39,15 @@
 ### Medium (Jade)
 <img src="renderingResult/mediumJade.PNG">
 
+### BSSRDF (Skin, x50)
+<img src="renderingResult/bssrdf50.PNG">
+
+### BSSRDF (Skin, x200)
+<img src="renderingResult/bssrdf200.PNG">
+
+### BSSRDF (Skin, x800)
+<img src="renderingResult/bssrdf800.PNG">
+
 # Library and external dependancy
 - cuda
 - glut

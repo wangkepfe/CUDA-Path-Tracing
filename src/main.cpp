@@ -170,10 +170,13 @@ void disp(void)
 	// calculate a new seed for the random number generator, based on the framenumber
 	unsigned int hashedframes = WangHash(framenumber);
 
+	BSSRDF bssrdf {bssrdfRhoNum, bssrdfRadiusNum, bssrdfRho, bssrdfRadius, bssrdfProfile, bssrdfProfileCDF, bssrdfRhoEff};
+
 	// gateway from host to CUDA, passes all data needed to render frame (triangles, BVH tree, camera) to CUDA for execution
 	cudaRender(cudaNodePtr, cudaTriWoopPtr, cudaTriDebugPtr, cudaTriIndicesPtr, finaloutputbuffer,
-			   accumulatebuffer, gpuHDRenv, gpuTextureArray, framenumber, hashedframes, nodeSize, leafnode_count, triangle_count, cudaRendercam,
-			   cudaUvPtr, cudaNormalPtr, cudaMaterialPtr);
+			   accumulatebuffer, gpuHDRenv, gpuTextureArray, framenumber, hashedframes, 
+			   nodeSize, leafnode_count, triangle_count, cudaRendercam, 
+			   cudaUvPtr, cudaNormalPtr, cudaMaterialPtr, bssrdf);
 
 	cudaThreadSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -352,25 +355,11 @@ void initHDR()
 
 void initBssrdfTable() 
 {
-	// int bssrdfRhoNum = 0;
-	// int bssrdfRadiusNum = 0;
-	// float *bssrdfRho = NULL;
-	// float *bssrdfRadius = NULL;
-	// float *bssrdfProfile = NULL;
-	// float *bssrdfProfileCDF = NULL;
-	// float *bssrdfRhoEff = NULL;
-
 	bssrdfRhoNum = 100;
 	bssrdfRadiusNum = 64;
 
 	BssrdfTable table(bssrdfRhoNum, bssrdfRadiusNum);
 	ComputeBeamDiffusionBSSRDF(0, 1.4f, &table);
-
-	// std::unique_ptr<float[]> rhoSamples;
-    // std::unique_ptr<float[]> radiusSamples;
-    // std::unique_ptr<float[]> profile;
-    // std::unique_ptr<float[]> rhoEff;
-    // std::unique_ptr<float[]> profileCDF;
 
 	cudaMalloc((void **)&bssrdfRho,        bssrdfRhoNum * sizeof(float));
 	cudaMalloc((void **)&bssrdfRadius,     bssrdfRadiusNum * sizeof(float));
