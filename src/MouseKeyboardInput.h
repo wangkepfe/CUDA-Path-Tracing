@@ -24,7 +24,7 @@ int theModifierState = 0;
 // keyboard interaction
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
-	const int TEST_MATERIAL_NUM = 15;
+	const int TEST_MATERIAL_NUM = 20;
 
 	switch (key) {
 

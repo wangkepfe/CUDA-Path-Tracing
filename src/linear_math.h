@@ -28,7 +28,7 @@ struct Vec2f
 	inline __host__ __device__ Vec2f operator*(float a) const{ return Vec2f(x*a, y*a); }
 	inline __host__ __device__ Vec2f operator/(float a) const{ return Vec2f(x / a, y / a); }
 
-	inline __host__ __device__ float operator[](unsigned int a) const { return _v[a]; }
+	inline __host__ __device__ float& operator[](unsigned int a) { return _v[a]; }
 };
 
 inline __host__ __device__ Vec2f& operator*(float a, Vec2f& v){ v.x *= a; v.y *= a;           return v; }
@@ -66,7 +66,7 @@ struct Vec3f
 	__host__ __device__ Vec3f(float _x) : x(_x), y(_x), z(_x) {}
 	__host__ __device__ Vec3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 	__host__ __device__ Vec3f(const Vec3f& v) : x(v.x), y(v.y), z(v.z) {}
-	inline __host__ __device__ float length(){ return sqrtf(x*x + y*y + z*z); }
+	inline __host__ __device__ float length() const { return sqrtf(x*x + y*y + z*z); }
 	// sometimes we dont need the sqrt, we are just comparing one length with another
 	inline __host__ __device__ float lengthsq(){ return x*x + y*y + z*z; }
 	inline __host__ __device__ float max(){ return max1f(max1f(x, y), z); }
@@ -87,6 +87,7 @@ struct Vec3f
 	inline __host__ __device__ bool operator!=(const Vec3f& v){ return x != v.x || y != v.y || z != v.z; }
 	inline __host__ __device__ bool operator==(const Vec3f& v){ return x == v.x && y == v.y && z == v.z; }
 	inline __host__ __device__ float& operator[](int i) { return _v[i]; }
+	inline __host__ __device__ const float& operator[](int i) const { return _v[i]; }
 };
 
 inline __host__ __device__ Vec3f operator*(float a, Vec3f& v){ return Vec3f(v.x*a, v.y*a, v.z*a); }
@@ -94,6 +95,7 @@ inline __host__ __device__ Vec3f operator-(const Vec3f& v) { return Vec3f(-v.x, 
 inline __host__ __device__ Vec3f abs(const Vec3f& v) { return Vec3f(fabsf(v.x), fabsf(v.y), fabsf(v.z)); }
 inline __host__ __device__ Vec3f max(const Vec3f& v1, const Vec3f& v2) { return Vec3f(max1f(v1.x, v2.x), max1f(v1.y, v2.y), max1f(v1.z, v2.z)); }
 inline __host__ __device__ void swap(Vec3f& v1, Vec3f& v2) { Vec3f tmp = v1; v1 = v2; v2 = tmp; }
+inline __host__ __device__ Vec3f normalize(const Vec3f& v) { float norm = sqrtf(v.x*v.x + v.y*v.y + v.z*v.z); return Vec3f(v.x/norm, v.y/norm, v.z/norm); }
 
 struct Vec3i
 {
@@ -108,6 +110,7 @@ struct Vec3i
 	__host__ __device__ Vec3i(const Vec3f& vf) : x(vf.x), y(vf.y), z(vf.z) {}
 
 	inline __host__ __device__ bool operator==(const Vec3i& v){ return x == v.x && y == v.y && z == v.z; }
+	inline __host__ __device__ int& operator[](int i) { return _v[i]; }
 };
 
 struct Vec4f

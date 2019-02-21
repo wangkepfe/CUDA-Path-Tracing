@@ -14,7 +14,9 @@
 // c++
 #include <sstream>
 #include <iostream>
+#include <fstream>
 #include <unordered_map>
+#include <string>
 
 // bvh
 #include "Array.h"
@@ -41,6 +43,10 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
+// tiny ply
+#define TINYPLY_IMPLEMENTATION
+#include "tinyply.h"
+
 // cuda
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -49,9 +55,12 @@
 #include "CudaRenderKernel.h"
 
 // user input (hard coded)
-const std::string scenefile = "data/TestObj.obj";
+//const std::string scenefile = "data/TestObj.obj";
 const std::string HDRmapname = "data/pisa.hdr";
-const std::string textureFile = "data/Checker.png";
+//const std::string textureFile = "data/Checker.png";
+
+const std::string scenefile = "data/head.ply";
+const std::string textureFile = "data/head_albedomap.png";
 
 // BVH
 Vec4i *cpuNodePtr = NULL;
@@ -416,58 +425,114 @@ void initCUDAscenedata()
 // load obj file, create cpu bvh, create gpu bvh
 void createBVH()
 {
-	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> shapes;
-	std::vector<tinyobj::material_t> materials;
-	std::string warn, err;
-
-	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scenefile.c_str(), "data"))
-	{
-		std::cout << "failed to load model!\n";
-	}
-
-	Array<Scene::Triangle> tris;
-	Array<Vec3f> verts;
-	tris.clear();
-	verts.clear();
-
+	unsigned int totalTriangleCount = 0;
+	unsigned int totalVertPosCount  = 0;
+	Array<Scene::Triangle> tris;            tris.clear();
+	Array<Vec3f>           verts;           verts.clear();
 	std::vector<S32> matIds;
 
-	unsigned int totalTriangleCount = 0;
-	unsigned int totalVertPosCount = 0;
+	auto ext = scenefile.substr(scenefile.find_last_of(".") + 1);
+	if (ext == "obj") {
+		tinyobj::attrib_t attrib;
+		std::vector<tinyobj::shape_t> shapes;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
 
-	// vertex position triangle index
-	for (const auto &shape : shapes)
-	{
-		const auto &indices = shape.mesh.indices;
-		const auto &matId = shape.mesh.material_ids;
-		for (unsigned int i = 0; i < indices.size() / 3; ++i)
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scenefile.c_str(), "data"))
 		{
-			Scene::Triangle newtri;
-			int vi0 = indices[i * 3].vertex_index;
-			int vi1 = indices[i * 3 + 1].vertex_index;
-			int vi2 = indices[i * 3 + 2].vertex_index;
-			newtri.vertices = Vec3i(vi0, vi1, vi2);
-
-			newtri.uv[0] = Vec2f(attrib.texcoords[indices[i * 3    ].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3    ].texcoord_index * 2 + 1]);
-			newtri.uv[1] = Vec2f(attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2 + 1]);
-			newtri.uv[2] = Vec2f(attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2 + 1]);
-
-			newtri.normal[0] = Vec3f(attrib.normals[indices[i * 3    ].normal_index * 3], attrib.normals[indices[i * 3    ].normal_index * 3 + 1], attrib.normals[indices[i * 3    ].normal_index * 3 + 2]);
-			newtri.normal[1] = Vec3f(attrib.normals[indices[i * 3 + 1].normal_index * 3], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 2]);
-			newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
-
-			tris.add(newtri);
-
-			matIds.push_back(matId[i]);
+			std::cout << "failed to load model!\n";
 		}
-		totalTriangleCount += indices.size() / 3;
-	}
 
-	// vertex position
-	totalVertPosCount = attrib.vertices.size() / 3;
-	for (unsigned int i = 0; i < attrib.vertices.size() / 3; ++i) {
-		verts.add(Vec3f(attrib.vertices[i * 3], attrib.vertices[i * 3 + 1], attrib.vertices[i * 3 + 2]));
+		// vertex position triangle index
+		for (const auto &shape : shapes)
+		{
+			const auto &indices = shape.mesh.indices;
+			const auto &matId = shape.mesh.material_ids;
+			for (unsigned int i = 0; i < indices.size() / 3; ++i)
+			{
+				Scene::Triangle newtri;
+				int vi0 = indices[i * 3].vertex_index;
+				int vi1 = indices[i * 3 + 1].vertex_index;
+				int vi2 = indices[i * 3 + 2].vertex_index;
+				newtri.vertices = Vec3i(vi0, vi1, vi2);
+
+				newtri.uv[0] = Vec2f(attrib.texcoords[indices[i * 3    ].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3    ].texcoord_index * 2 + 1]);
+				newtri.uv[1] = Vec2f(attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2 + 1]);
+				newtri.uv[2] = Vec2f(attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2 + 1]);
+
+				newtri.normal[0] = Vec3f(attrib.normals[indices[i * 3    ].normal_index * 3], attrib.normals[indices[i * 3    ].normal_index * 3 + 1], attrib.normals[indices[i * 3    ].normal_index * 3 + 2]);
+				newtri.normal[1] = Vec3f(attrib.normals[indices[i * 3 + 1].normal_index * 3], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 2]);
+				newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
+
+				tris.add(newtri);
+
+				matIds.push_back(matId[i]);
+			}
+			totalTriangleCount += indices.size() / 3;
+		}
+
+		// vertex position
+		totalVertPosCount = attrib.vertices.size() / 3;
+		for (unsigned int i = 0; i < attrib.vertices.size() / 3; ++i) {
+			verts.add(Vec3f(attrib.vertices[i * 3], attrib.vertices[i * 3 + 1], attrib.vertices[i * 3 + 2]));
+		}
+	} else if (ext == "ply") {
+		using namespace tinyply;
+		std::ifstream ss(scenefile, std::ios::binary);
+		PlyFile file;
+		file.parse_header(ss);
+		std::cout << "........................................................................\n";
+		for (auto c : file.get_comments()) std::cout << "Comment: " << c << std::endl;
+		for (auto e : file.get_elements())
+		{
+			std::cout << "element - " << e.name << " (" << e.size << ")" << std::endl;
+			for (auto p : e.properties) std::cout << "\tproperty - " << p.name << " (" << tinyply::PropertyTable[p.propertyType].str << ")" << std::endl;
+		}
+		std::cout << "........................................................................\n";
+		
+		std::shared_ptr<PlyData> plyVert, plyNormals, plyFaces, plyTexcoords;
+		
+		try { plyVert = file.request_properties_from_element("vertex", { "x", "y", "z" }); } catch (const std::exception & e) { std::cerr << "tinyply exception: " << e.what() << std::endl; }
+		try { plyNormals = file.request_properties_from_element("vertex", { "nx", "ny", "nz" }); } catch (const std::exception & e) { std::cerr << "tinyply exception: " << e.what() << std::endl; }
+		try { plyTexcoords = file.request_properties_from_element("vertex", { "u", "v" }); } catch (const std::exception & e) { std::cerr << "tinyply exception: " << e.what() << std::endl; }
+		try { plyFaces = file.request_properties_from_element("face", { "vertex_indices" }, 3); } catch (const std::exception & e) { std::cerr << "tinyply exception: " << e.what() << std::endl; }
+		
+		file.read(ss);
+		
+		if (plyVert) std::cout << "\tRead " << plyVert->count << " total vertices "<< std::endl;
+		if (plyNormals) std::cout << "\tRead " << plyNormals->count << " total vertex normals " << std::endl;
+		if (plyTexcoords) std::cout << "\tRead " << plyTexcoords->count << " total vertex texcoords " << std::endl;
+		if (plyFaces) std::cout << "\tRead " << plyFaces->count << " total faces " << std::endl;
+
+		unsigned int i, j;
+		std::vector<Vec3f> vVert(plyVert->count);
+		std::memcpy(vVert.data(), plyVert->buffer.get(), plyVert->buffer.size_bytes());
+		for (i = 0; i < plyVert->count; ++i) {
+			verts.add(vVert[i]);
+		}
+	
+		std::vector<Vec3f> vN(plyNormals->count);
+		std::memcpy(vN.data(), plyNormals->buffer.get(), plyNormals->buffer.size_bytes());
+
+		std::vector<Vec2f> vUv(plyTexcoords->count);
+		std::memcpy(vUv.data(), plyTexcoords->buffer.get(), plyTexcoords->buffer.size_bytes());
+
+		std::vector<Vec3i> vIdx(plyFaces->count);
+		std::memcpy(vIdx.data(), plyFaces->buffer.get(), plyFaces->buffer.size_bytes());
+
+		for (i = 0; i < plyFaces->count; ++i) {
+			Scene::Triangle newtri;
+			newtri.vertices = vIdx[i];
+			for (j = 0; j < 3; ++j) {
+				newtri.uv[j] = Vec2f(vUv[vIdx[i][j]].x, 1.0f - vUv[vIdx[i][j]].y);
+				newtri.normal[j] = vN[vIdx[i][j]];
+			}
+			tris.add(newtri);
+			matIds.push_back(4);
+		}
+
+		totalVertPosCount = plyVert->count;
+		totalTriangleCount = plyFaces->count;
 	}
 
 	cpuMaterialPtr = new S32[totalTriangleCount];

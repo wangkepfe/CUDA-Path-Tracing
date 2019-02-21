@@ -5,7 +5,7 @@
 #include "mathDefine.h"
 #include "bssrdfTable.h"
 
-__device__ inline float EvalProfile(BSSRDF& table, int rhoIndex, int radiusIndex) {
+__device__ inline float EvalProfile(const BSSRDF& table, int rhoIndex, int radiusIndex) {
     return table.profile[rhoIndex * table.radiusNum + radiusIndex];
 }
 
@@ -160,7 +160,7 @@ __device__ inline float SampleCatmullRom2D(int size1, int size2,
 }
 
 __device__ inline float sampleBSSRDFtable(BSSRDF& table, float sigmaT, float rho, float u) {
-    if (sigmaT == 0) return -1;
+    if (sigmaT == 0) return 0.0f;
     return SampleCatmullRom2D(table.rhoNum, table.radiusNum, table.rho, table.radius, table.profile, table.profileCDF, rho, u) / sigmaT;
 }
 
@@ -169,7 +169,7 @@ __device__ inline void sampleBSSRDFprobeRay (
     Vec3f& normal, Vec3f& hitpoint,
     Vec3f sigmaT, Vec3f& rho,
     Vec3f& probeRayOrig, Vec3f& probeRayDir, float& probeRayLength, 
-    BSSRDF& table, Vec3f& vx, Vec3f& vy) {
+    BSSRDF& table, Vec3f& vx, Vec3f& vy, int& sampleAxis, float& sampleRadius) {
 
     // probe ray direction
     Vec3f probex, probey;
@@ -177,14 +177,17 @@ __device__ inline void sampleBSSRDFprobeRay (
         probeRayDir = vx;
         probex = normal;
         probey = vy;
+        sampleAxis = 0;
     } else if (r4 < 0.5f) {
         probeRayDir = vy;
         probex = vx;
         probey = normal;
+        sampleAxis = 1;
     } else {
         probeRayDir = normal;
         probex = vx;
         probey = vy;
+        sampleAxis = 2;
     }
     
     // sample a channel (r g b)
@@ -198,8 +201,10 @@ __device__ inline void sampleBSSRDFprobeRay (
     float radiusMax = sampleBSSRDFtable(table, sigmaT[ch], rho[ch], 0.999f);
 
     // probe ray
-    probeRayLength = 2.0f * sqrt(radiusMax * radiusMax - radius * radius);
+    probeRayLength = 2.0f * sqrtf(radiusMax * radiusMax - radius * radius);
     probeRayOrig = hitpoint + radius * (probex * cos(phi) + probey * sin(phi)) - probeRayLength * probeRayDir * 0.5f;
+
+    sampleRadius = radius;
 
     // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
     // if (threadId == 460800) {
@@ -233,24 +238,46 @@ __device__ inline float FrSh(float F0, float cosTheta) {
 }
 
 __device__ inline void calculateBSSRDF( 
-        Vec3f& normal, Vec3f& normalNext,
-        Vec3f& nextDir,
-        Vec3f& sigmaT, Vec3f& rho, float eta,
-        Vec3f& beta, BSSRDF& table, Vec3f d,
-        Vec3f& ss, Vec3f& ts)
+        const Vec3f& ns, const Vec3f& normalNext, const Vec3f& nextDir,
+        const Vec3f& sigmaT, const Vec3f& rho, const float eta,
+        Vec3f& beta, const BSSRDF& table, const Vec3f& d,
+        const Vec3f& ss, const Vec3f& ts, const int sampleAxis, const float sampleRadius)
 {
+    // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
     float radius = d.length();
-    Vec3f& ns = normal;
-    Vec3f dLocal(dot(ss, d), dot(ts, d), dot(ns, d));
-    Vec3f nLocal( abs(dot(ss, normalNext)), abs(dot(ts, normalNext)), abs(dot(ns, normalNext)) );
-    Vec3f dLocal2 = dLocal * dLocal;
-    float rProj[3] = { sqrt(dLocal2.y + dLocal2.z), sqrt(dLocal2.z + dLocal2.x), sqrt(dLocal2.x + dLocal2.y) };
-    float axisProb[3] = {0.25f, 0.25f, 0.5f};
+
+    Vec3f dLocal (dot(ss, d), dot(ts, d), dot(ns, d));
+    dLocal *= dLocal;
+
+    float radiusProjection[3] = { sqrtf(dLocal.y + dLocal.z), sqrtf(dLocal.z + dLocal.x), sqrtf(dLocal.x + dLocal.y) };
+
+    float axisChannelPdf[3] = {
+        abs(dot(ss, normalNext)) * 0.08333333333f,  // 0.25 / 3
+        abs(dot(ts, normalNext)) * 0.08333333333f,  // 0.25 / 3
+        abs(dot(ns, normalNext)) * 0.16666666666f   // 0.5 / 3
+    };
+
+    Vec3f sigmaT2 = sigmaT * sigmaT;
+
+    Vec3f d_direction = normalize(d);
+
+    // if (threadId == 460800) {
+    //     printf("BSSRDF: entering kernel ......\n");
+    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
+    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
+    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f)\n", radiusProjection[0], radiusProjection[1], radiusProjection[2]);
+    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
+    // }
 
     float pdf = 0.0f;
     for (int axis = 0; axis < 3; ++axis) {
+        float axisPdf = 0.0f;
+
         for (int ch = 0; ch < 3; ++ch) {
-            float rOptical = rProj[axis] * sigmaT[ch];
+            float channelPdf = 0.0f;
+            float rOptical = radiusProjection[axis] * sigmaT[ch];
     
             int rhoOffset, radiusOffset;
             float rhoWeights[4], radiusWeights[4];
@@ -267,12 +294,27 @@ __device__ inline void calculateBSSRDF(
                 }
             }
     
-            if (rOptical != 0) sr /= TWO_PI * rOptical;
-            pdf += max(0.0f, sr * sigmaT[ch] * sigmaT[ch] / rhoEff) * nLocal[axis] * axisProb[axis] / 3.0f;
+            if (rOptical > 0.00001) {
+                channelPdf = sr * sigmaT[ch] / radiusProjection[axis] / rhoEff / TWO_PI;
+            } else {
+                channelPdf = sr * sigmaT2[ch] / rhoEff;
+            }
+
+            // if (threadId == 460800) {
+            //     printf("BSSRDF:         Ch %d: rOptical = %.5f, sr = %.5f, rhoEff = %.5f, channel pdf = %.5f\n", ch, rOptical, sr, rhoEff, channelPdf);
+            // }
+
+            axisPdf += max(0.0f, channelPdf);
         }
+
+        // if (threadId == 460800) {
+        //     printf("BSSRDF:     Ax %d: axis pdf = %.5f\n", axis, axisPdf);
+        // }
+
+        pdf += axisPdf * axisChannelPdf[axis];
     }
 
-    Vec3f Sr(0.0f);
+    Vec3f Sr (0.0f, 0.0f, 0.0f);
     for (int ch = 0; ch < 3; ++ch) {
         float rOptical = radius * sigmaT[ch];
 
@@ -289,17 +331,133 @@ __device__ inline void calculateBSSRDF(
             }
         }
 
-        if (rOptical != 0) sr /= TWO_PI * rOptical;
-        Sr[ch] = max(0.0f, sr * sigmaT[ch] * sigmaT[ch]);
+        if (rOptical > 0.00001) {
+            sr /= TWO_PI * rOptical;
+        }
+
+        Sr[ch] = max(0.0f, sr * sigmaT2[ch]);
     }
 
     float outS = (1 - FrD(dot(nextDir, normalNext), 1.0f, eta)) / (1.0f - 2.0f * FM1(1.0f / eta));
 
     beta = Sr / pdf * outS;
 
-    //int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
     // if (threadId == 460800) {
-    //     printf("BSSRDF: pdf = %f, Sr = (%f, %f, %f), outS = %f\n", 
-    //         pdf, Sr.x, Sr.y, Sr.z, outS);
+    //     printf("BSSRDF: rProj = (%.5f, %.5f, %.5f), radius = %.5f\n", radiusProjection[0], radiusProjection[1], radiusProjection[2], radius);
+    //     printf("BSSRDF: pdf = %.5f, Sr = (%.5f, %.5f, %.5f), outS = %.5f, beta = (%.5f, %.5f, %.5f)\n", pdf, Sr.x, Sr.y, Sr.z, outS, beta.x, beta.y, beta.z);
+    //     printf("\n\n");
     // }
 }
+
+// __device__ inline void calculateBSSRDF( 
+//     const Vec3f& ns, const Vec3f& normalNext, const Vec3f& nextDir,
+//     const Vec3f& sigmaT, const Vec3f& rho, const float eta,
+//     Vec3f& beta, const BSSRDF& table, const Vec3f& d,
+//     const Vec3f& ss, const Vec3f& ts, const int axis, const float sampleRadius)
+// {
+//     int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
+//     float radius = d.length();
+
+//     // Vec3f dLocal (dot(ss, d), dot(ts, d), dot(ns, d));
+//     // dLocal *= dLocal;
+
+//     // float radiusProjection[3] = { 
+//     //     sqrtf(dLocal.y + dLocal.z), 
+//     //     sqrtf(dLocal.z + dLocal.x), 
+//     //     sqrtf(dLocal.x + dLocal.y)
+//     // };
+
+//     float axisChannelPdf[3] = {
+//         abs(dot(ss, normalNext)) / 3.0f,
+//         abs(dot(ts, normalNext)) / 3.0f,
+//         abs(dot(ns, normalNext)) / 3.0f
+//     };
+
+//     Vec3f sigmaT2 = sigmaT * sigmaT;
+
+//     Vec3f d_direction = normalize(d);
+
+//     if (threadId == 460800) {
+//         printf("BSSRDF: entering kernel ......\n");
+//         printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
+//         printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
+//         printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+//         printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
+//     }
+
+//     float pdf = 0.0f;
+//     float axisPdf = 0.0f;
+
+//     for (int ch = 0; ch < 3; ++ch) {
+//         float channelPdf = 0.0f;
+//         float rOptical = sampleRadius * sigmaT[ch];
+
+//         int rhoOffset, radiusOffset;
+//         float rhoWeights[4], radiusWeights[4];
+//         if (!CatmullRomWeights(table.rhoNum,    table.rho,    rho[ch],  &rhoOffset,    rhoWeights    ) ||
+//             !CatmullRomWeights(table.radiusNum, table.radius, rOptical, &radiusOffset, radiusWeights ))
+//             break;
+
+//         float sr = 0.0f;
+//         float rhoEff = 0.0f;
+//         for (int i = 0; i < 4; ++i) {
+//             rhoEff += table.rhoEff[rhoOffset + i] * rhoWeights[i];
+//             for (int j = 0; j < 4; ++j) {
+//                 sr += EvalProfile(table, rhoOffset + i, radiusOffset + j) * rhoWeights[i] * radiusWeights[j];
+//             }
+//         }
+
+//         if (rOptical > 0.00001) {
+//             channelPdf = sr * sigmaT[ch] / sampleRadius / rhoEff / TWO_PI;
+//         } else {
+//             channelPdf = sr * sigmaT2[ch] / rhoEff;
+//         }
+
+//         if (threadId == 460800) {
+//             printf("BSSRDF:         Ch %d: rOptical = %.5f, sr = %.5f, rhoEff = %.5f, channel pdf = %.5f\n", ch, rOptical, sr, rhoEff, channelPdf);
+//         }
+
+//         axisPdf += max(0.0f, channelPdf);
+//     }
+
+//     if (threadId == 460800) {
+//         printf("BSSRDF:     Ax %d: axis pdf = %.5f\n", axis, axisPdf);
+//     }
+
+//     pdf += axisPdf * axisChannelPdf[axis];
+
+//     Vec3f Sr (0.0f, 0.0f, 0.0f);
+//     for (int ch = 0; ch < 3; ++ch) {
+//         float rOptical = radius * sigmaT[ch];
+
+//         int rhoOffset, radiusOffset;
+//         float rhoWeights[4], radiusWeights[4];
+//         if (!CatmullRomWeights(table.rhoNum,    table.rho,    rho[ch],  &rhoOffset,    rhoWeights    ) ||
+//             !CatmullRomWeights(table.radiusNum, table.radius, rOptical, &radiusOffset, radiusWeights ))
+//             continue;
+
+//         float sr = 0.0f;
+//         for (int i = 0; i < 4; ++i) {
+//             for (int j = 0; j < 4; ++j) {
+//                 sr += EvalProfile(table, rhoOffset + i, radiusOffset + j) * rhoWeights[i] * radiusWeights[j];
+//             }
+//         }
+
+//         if (rOptical > 0.00001) {
+//             sr /= TWO_PI * rOptical;
+//         }
+
+//         Sr[ch] = max(0.0f, sr * sigmaT2[ch]);
+//     }
+
+//     float outS = (1 - FrD(dot(nextDir, normalNext), 1.0f, eta)) / (1.0f - 2.0f * FM1(1.0f / eta));
+
+//     beta = Sr / pdf * outS;
+
+//     if (threadId == 460800) {
+//         printf("BSSRDF: sampleRadius = %.5f, radius = %.5f\n", sampleRadius, radius);
+//         printf("BSSRDF: pdf = %.5f, Sr = (%.5f, %.5f, %.5f), outS = %.5f, beta = (%.5f, %.5f, %.5f)\n", pdf, Sr.x, Sr.y, Sr.z, outS, beta.x, beta.y, beta.z);
+//         printf("\n\n");
+//     }
+// }

@@ -80,10 +80,8 @@ struct Ray {
 };
 
 struct Sphere {
-	float rad;				// radius 
-	Vec3f pos, emi, col;	// position, emission, color 
-	Refl_t refl;			// reflection type (DIFFuse, SPECular, REFRactive)
-	int medium;
+	float rad; 
+	Vec3f pos;
 
 	__device__ float intersect(const Ray &r) const { // returns distance, 0 if nohit 
 		// ray/sphere intersection
@@ -94,6 +92,10 @@ struct Sphere {
 		if (disc<0) return 0; else disc = sqrtf(disc);
 		return (t = b - disc) > M_EPSILON ? t : ((t = b + disc) > M_EPSILON ? t : 0.0f);
 	}
+
+	__device__ Vec3f getNormal(const Vec3f& point) const {
+		return normalize(point - pos);
+	}
 };
 
 struct GroundPlane {
@@ -101,6 +103,9 @@ struct GroundPlane {
 	float y;
 	__device__ float intersect(const Ray &r) const { // returns distance, 0 if nohit 
 		return abs(r.dir.y) > M_EPSILON ? ((y - r.orig.y) / r.dir.y) : 0.0f;
+	}
+	__device__ Vec3f getNormal() const {
+		return Vec3f(0.0f, 1.0f, 0.0f);
 	}
 };
 
@@ -331,7 +336,7 @@ __device__ void intersectBVHandTriangles(
 			asm("{\n"
 				"   .reg .pred p;               \n"
 				"setp.ge.s32        p, %1, 0;   \n"
-				"vote.ballot.b32    %0,p;       \n"
+				"vote.sync.ballot.b32    %0,p,0xffffffff;  \n"
 				"}"
 				: "=r"(mask)
 				: "r"(leafAddr));
@@ -437,6 +442,53 @@ __device__ void intersectBVHandTriangles(
 	hitdistance = hitT;
 }
 
+
+__device__ Vec3f envLight(const Camera* userSetting, Vec3f& raydir) {
+	// Convert (normalized) dir to spherical coordinates.
+	float longlatX = atan2f(raydir.x, raydir.z); // Y is up, swap x for y and z for x
+	longlatX = longlatX < 0.f ? longlatX + TWO_PI : longlatX;  // wrap around full circle if negative
+	float longlatY = acosf(raydir.y); // add RotateMap at some point, see Fragmentarium
+	
+	float u = fmod(longlatX / (float)TWO_PI + userSetting->envMapRotation, 1.0f); // +offsetY;
+	float v = longlatY / M_PI;
+
+	Vec3f emit;
+
+	float4 HDRcol = tex2D(HDRtexture, u, v);
+	if (userSetting->testLighting) {
+		emit = Vec3f(HDRcol.x, HDRcol.y, HDRcol.z);
+	} else {
+		emit = Vec3f(0.0f, 0.0f, 0.0f);
+	}
+
+	return emit;
+}
+
+__device__ void getSmoothTriangleNormal(Vec3f& smoothNormal, int hitTriAddr, const Vec3f& hitpoint) {
+	float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);      Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
+	float4 po1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);  Vec3f p1 = Vec3f(po1.x, po1.y, po1.z);
+	float4 po2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);  Vec3f p2 = Vec3f(po2.x, po2.y, po2.z);
+
+	//float2 uvo0 = tex1Dfetch(triUvTexture, hitTriAddr);        Vec2f uv0 = Vec2f(uvo0.x, uvo0.y);
+	//float2 uvo1 = tex1Dfetch(triUvTexture, hitTriAddr + 1);    Vec2f uv1 = Vec2f(uvo1.x, uvo1.y);
+	//float2 uvo2 = tex1Dfetch(triUvTexture, hitTriAddr + 2);    Vec2f uv2 = Vec2f(uvo2.x, uvo2.y);
+
+	float4 normal0 = tex1Dfetch(triNormalTexture, hitTriAddr);     Vec3f n0 = Vec3f(normal0.x, normal0.y, normal0.z);
+	float4 normal1 = tex1Dfetch(triNormalTexture, hitTriAddr + 1); Vec3f n1 = Vec3f(normal1.x, normal1.y, normal1.z);
+	float4 normal2 = tex1Dfetch(triNormalTexture, hitTriAddr + 2); Vec3f n2 = Vec3f(normal2.x, normal2.y, normal2.z);
+
+	//int originalIdx = tex1Dfetch(triIndicesTexture, hitTriAddr);
+	//int materialId = tex1Dfetch(triMaterialTexture, originalIdx);
+
+	// barycentric interpolation
+	float u, v, w;
+	Barycentric(hitpoint, p0, p1, p2, u, v, w);
+
+	// interpolate uv and normal
+	// Vec2f hitUv = uv0 * u + uv1 * v + uv2 * w;
+	smoothNormal = n0 * u + n1 * v + n2 * w;
+}
+
 // renderKernel:
 // - ray scene traversal
 // - surface/media interaction
@@ -456,6 +508,7 @@ __device__ Vec3f renderKernel(
 	float sceneT;
 
 	// scene interaction
+	int geometryType;
 	Vec3f hitpoint;
 	Vec3f n;
 	Vec3f nl;
@@ -475,6 +528,7 @@ __device__ Vec3f renderKernel(
 	bool useNormal;
 	Vec3f F0;
 	Vec3f tangent;
+	float scaleFactor;
 
 	// global color mask, result color
 	Vec3f mask = Vec3f(1.0f, 1.0f, 1.0f);
@@ -497,6 +551,7 @@ __device__ Vec3f renderKernel(
 		// initialize variables
 		{
 			// bvh traversal result
+			geometryType = 0;
 			hitTriAddr = -1;
 			hitDistance = 1e20;
 			sceneT = 1e20;
@@ -518,6 +573,7 @@ __device__ Vec3f renderKernel(
 			//Vec3f F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
 			F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
 			tangent = Vec3f(0.0f, 1.0f, -1.0f);
+			scaleFactor = 1.0f;
 		}
 		
 		// ------------------------ scene interaction ----------------------------
@@ -530,11 +586,32 @@ __device__ Vec3f renderKernel(
 			hitDistance, 
 			trinormal,
 			false);
-		
+
 		if (hitDistance < sceneT && hitDistance > RAY_MIN) { // triangle hit
 			sceneT = hitDistance;
 			n = trinormal;
+			geometryType = GEO_TRIANGLE;
+		} 
+
+		#if 0
+		GroundPlane gp {-10.0f};
+		hitDistance = gp.intersect(Ray(rayorig, raydir));
+		if (hitDistance < sceneT && hitDistance > RAY_MIN) {
+			sceneT = hitDistance;
+			n = gp.getNormal();
+			geometryType = GEO_GROUND;
 		}
+		#endif
+
+		#if 1
+		Sphere sphere {10.0f, Vec3f(0.0f, -15.0f, 0.0f)};
+		hitDistance = sphere.intersect(Ray(rayorig, raydir));
+		if (hitDistance < sceneT && hitDistance > RAY_MIN) {
+			sceneT = hitDistance;
+			n = sphere.getNormal(rayorig + raydir * sceneT);
+			geometryType = GEO_SPHERE;
+		}
+		#endif
 
 		// environmental sphere
 		if (sceneT > 1e10f) {
@@ -552,9 +629,8 @@ __device__ Vec3f renderKernel(
 			} else {
 				emit = Vec3f(0.0f, 0.0f, 0.0f);
 			}
-			
-
-			accucolor += mask * emit * 1.5f; 
+		
+			accucolor += mask * emit; 
 			return accucolor; 
 		}
 
@@ -583,6 +659,7 @@ __device__ Vec3f renderKernel(
 		hitpoint = rayorig + raydir * sceneT;
 
 		// texture fetching
+		if (geometryType == GEO_TRIANGLE)
 		{
 			// read triangle's vertex postion, uv, normal, material index
 			float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);      Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
@@ -710,15 +787,23 @@ __device__ Vec3f renderKernel(
 				else if (materialId == 1) { refltype = MAT_REFL; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
 				else if (materialId == 3) { refltype = MAT_NO; /*refltype = MAT_EMIT; emit = Vec3f(2.0f, 2.0f, 2.0f);*/ } // light
-				else if (materialId == 4) { refltype = MAT_SUBSURFACE; } // outer
+				else if (materialId == 4) { refltype = MAT_SUBSURFACE; scaleFactor = 1000.0f; } // outer
 			} 
-			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // subsurface
+			else if (userSetting->testMaterialIdx == ++sceneTestIdx) // skin
 			{
 				if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; } // ground
 				else if (materialId == 1) { refltype = MAT_REFL; } // inner
 				else if (materialId == 2) { refltype = MAT_REFL; } // ground label
 				else if (materialId == 3) { refltype = MAT_NO; if(!userSetting->testLighting) {refltype = MAT_EMIT; emit = Vec3f(2.0f, 2.0f, 2.0f);} } // light
-				else if (materialId == 4) { refltype = MAT_SKIN; alphax = 0.1f; kd = 1.0f; ks = 1.0f; F0 = Vec3f(0.03f); } // outer
+				else if (materialId == 4) { 
+					refltype = MAT_SKIN; 
+					alphax = 0.5f; 
+					kd = 1.0f; 
+					ks = 1.0f; 
+					F0 = Vec3f(0.03f);
+					scaleFactor = 1000.0f;
+					useTexture = true;
+				} // outer
 			}
 			// 0
 			else // lambertian reflection
@@ -732,6 +817,12 @@ __device__ Vec3f renderKernel(
 
 			if (userSetting->testTexture && useTexture) { objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z); } 
 			if (userSetting->testNormal && useNormal)   { n = smoothNormal; } 
+		}
+		else if (geometryType == GEO_GROUND) {
+			refltype = MAT_DIFF;
+		}
+		else if (geometryType == GEO_SPHERE) {
+			refltype = MAT_DIFF;
 		}
 
 		// n is the geometry surface normal, nl always has opposite direction with raydir
@@ -810,139 +901,148 @@ __device__ Vec3f renderKernel(
 				break;
 			}
 			case MAT_SUBSURFACE: {
-				//int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
-
-				// float scaleFactor = 300.0f;
-				// MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor; // skin 1
-				// //MediumSS med = MediumSS(Vec3f{0.18, 0.07, 0.03} * 50.0f, Vec3f{0.061, 0.97, 1.45} * 50.0f, 0.0f); // ketchup
-				// //MediumSS med = MediumSS(Vec3f{2.55, 3.21, 3.77} * 50.0f, Vec3f{0.0011, 0.0024, 0.014} * 50.0f, 0.0f); // Wholemilk
-				// //MediumSS med = MediumSS(Vec3f{4.5513f, 5.8294f, 7.136f} * 100.0f, Vec3f{0.0015333f, 0.0046f, 0.019933f} * 100.0f, 0.0f); // Wholemilk
-
-				// Vec3f probeRayOrig;
-				// Vec3f probeRayDir;
-				// float probeRayLength;  
-
-				// Vec3f sigmaT = med.getSigmaT();
-				// Vec3f rho = med.getRho();
-			
-				// // if (threadId == 460800) {
-				// // 	printf("\n\nEntering subsurface scattering kernel...\n");
-				// // 	printf("BSSRDF: sigmaT = (%f, %f, %f), rho = (%f, %f, %f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
-				// // 	printf("BSSRDF: hitpoint = (%f, %f, %f), normal = (%f, %f, %f)\n", hitpoint.x, hitpoint.y, hitpoint.z, nl.x, nl.y, nl.z);
-				// // }
-
-				// float sampledRadius;
-				// sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, sampledRadius);
-
-				// // if (threadId == 460800) {
-				// // 	printf("BSSRDF: probeRayOrig = (%f, %f, %f), probeRayDir = (%f, %f, %f), probeRayLength = %f\n", 
-				// // 		probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, probeRayDir.x, probeRayDir.y, probeRayDir.z, probeRayLength);
-				// // }
+				// material define
+				MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor;
+				Vec3f sigmaT = med.getSigmaT();
+				Vec3f rho = med.getRho();
 				
-				// intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), 
-				// 						make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  probeRayLength),
-				// 						hitTriAddr, hitDistance, trinormal, false);
-
-				// int originalIdx = tex1Dfetch(triIndicesTexture,  hitTriAddr);
-				// int materialId  = tex1Dfetch(triMaterialTexture, originalIdx);
-
-				// if (!(hitDistance < probeRayLength && hitDistance > RAY_MIN && (materialId == 4))) {
-				// 	// if (threadId == 460800) {
-				// 	// 	printf("BSSRDF: probe ray missed.\n");	
-				// 	// }
-				// 	break; // try again	
-				// }
-
-				// float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);      Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
-				// float4 po1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);  Vec3f p1 = Vec3f(po1.x, po1.y, po1.z);
-				// float4 po2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);  Vec3f p2 = Vec3f(po2.x, po2.y, po2.z);
-
-				// float4 normal0 = tex1Dfetch(triNormalTexture, hitTriAddr);     Vec3f n0 = Vec3f(normal0.x, normal0.y, normal0.z);
-				// float4 normal1 = tex1Dfetch(triNormalTexture, hitTriAddr + 1); Vec3f n1 = Vec3f(normal1.x, normal1.y, normal1.z);
-				// float4 normal2 = tex1Dfetch(triNormalTexture, hitTriAddr + 2); Vec3f n2 = Vec3f(normal2.x, normal2.y, normal2.z);
-
-				// // normal
-				// float u, v, w;
-				// Barycentric(hitpoint, p0, p1, p2, u, v, w);
-				// Vec3f smoothNormal = n0 * u + n1 * v + n2 * w;
-				// smoothNormal.normalize();
-
-				// // next point
-				// Vec3f nextPoint = probeRayOrig + probeRayDir * hitDistance;
-
-				// // if (threadId == 460800) {
-				// // 	printf("BSSRDF: probe ray hit. nextPoint = (%f, %f, %f), normal = (%f, %f, %f), distance = %f\n", 
-				// // 		nextPoint.x, nextPoint.y, nextPoint.z, smoothNormal.x, smoothNormal.y, smoothNormal.z, (nextPoint - hitpoint).length());
-				// // }
-
-				// lambertianReflection(rd(randstate), rd(randstate), nextdir, smoothNormal);
-				// calculateBSSRDF(nl, smoothNormal, nextdir, sigmaT, rho, etaT, beta, bssrdf, sampledRadius, (nextPoint - hitpoint).length());
-				// mask *= beta;
-
-				// // if (threadId == 460800) {
-				// // 	printf("BSSRDF: nextdir = (%f, %f, %f), beta = (%f, %f, %f)\n\n", 
-				// // 		nextdir.x, nextdir.y, nextdir.z, beta.x, beta.y, beta.z);
-				// // }
-
-				// hitpoint = nextPoint + RAY_MIN * smoothNormal;
-			
-				break;
-			}
-			case MAT_SKIN: {
-				bool refl;
-				Vec3f sampledNormal;
-				microfacetSampling(rd(randstate), rd(randstate), into, raydir, nl, refl, etaT, alphax, sampledNormal, beta, nextdir);
-				if (refl) {
-					hitpoint += nl * RAY_MIN;
-					mask *= beta * ks;
-				} else {
-					float scaleFactor = 10.0f;
-					MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor; // skin 1
-					Vec3f sigmaT = med.getSigmaT();
-					Vec3f rho = med.getRho();
-					
-					Vec3f vx, vy;
-					localizeSample(nl, vx, vy);
-					SKIN_PROBE_TRY_AGAIN:;
-					int hitCount = 0;
-					Vec3f probeRayOrig, probeRayDir, probeHitPoint[5], probeHitPointNormal[5];
-					float probeRayLength;  
-					sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, vx, vy);
+				// localize
+				Vec3f vx, vy;
+				localizeSample(nl, vx, vy);
+				
+				// sample probe ray and probing
+				int hitCount = 0;
+				int sampleAxis;
+				Vec3f probeRayOrig, probeRayDir, probeNormal, probeHitPoint[5], probeHitPointNormal[5];
+				Vec3f probeRayVec;
+				float probeRayLength;
+				float sampleRadius;
+				
+				while(hitCount == 0) {
+					sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, vx, vy, sampleAxis, sampleRadius);
 					for (int i = 0; i < 5; ++i) {
-						intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  RAY_MAX), hitTriAddr, hitDistance, trinormal, false);
+						intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
 						if (probeRayLength < hitDistance) {
 							break;
 						}
 						Vec3f probeHitPointAny = probeRayOrig + probeRayDir * hitDistance;
-						if (tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr)) == 4) {
+						probeRayVec = probeHitPointAny - hitpoint;
+						if (tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr)) == 4 && (probeRayVec.length() / sampleRadius) < 1.414f) {
+
 							probeHitPoint[hitCount] = probeHitPointAny;
-							probeHitPointNormal[hitCount] = trinormal;
+							Vec3f smoothNormal;
+							getSmoothTriangleNormal(smoothNormal, hitTriAddr, probeHitPointAny);
+							probeHitPointNormal[hitCount] = normalize(smoothNormal);
+
 							++hitCount;
 						}
 						probeRayLength -= hitDistance;
 						probeRayOrig = probeHitPointAny + RAY_MIN * probeRayDir;
 					}
-					if (hitCount == 0) {
-						if (
-							#if USE_RUSSIAN == true
-							curand_uniform(randstate) < RUSSIAN_P && bounces < LIGHT_BOUNCE
-							#else
-							bounces < LIGHT_BOUNCE	
-							#endif
-						) {
-							++bounces;
-							goto SKIN_PROBE_TRY_AGAIN;
-						} else {
-							break;
-						}
-					}
-
-					int nextPointIdx = rd(randstate) * hitCount;
-					lambertianReflection(rd(randstate), rd(randstate), nextdir, probeHitPointNormal[nextPointIdx]);
-					calculateBSSRDF(nl, probeHitPointNormal[nextPointIdx], nextdir, sigmaT, rho, etaT, beta, bssrdf, probeHitPoint[nextPointIdx] - hitpoint, vx, vy);
-					mask *= beta * kd * hitCount;
-					hitpoint = probeHitPoint[nextPointIdx] + RAY_MIN * probeHitPointNormal[nextPointIdx];
 				}
+
+				if (hitCount == 0)
+					break;
+
+				// choose next point and sample next direction
+				int nextPointIdx = rd(randstate) * hitCount;
+				probeHitPointNormal[nextPointIdx].normalize();
+				lambertianReflection(rd(randstate), rd(randstate), nextdir, probeHitPointNormal[nextPointIdx]);
+
+				// calculate value
+				calculateBSSRDF(nl, probeHitPointNormal[nextPointIdx], nextdir, sigmaT, rho, etaT, beta, bssrdf, probeRayVec, vx, vy, sampleAxis, sampleRadius);
+				mask *= beta * kd * hitCount;
+
+				// small bias
+				hitpoint = probeHitPoint[nextPointIdx] + RAY_MIN * probeHitPointNormal[nextPointIdx];
+
+				// importance sampling
+				accucolor += mask * envLight(userSetting, nextdir);
+
+				break;
+			}
+			case MAT_SKIN: {
+				float &R = objcol.x;
+				float &G = objcol.y;
+				float &B = objcol.z;
+
+				//float Y = 0.2126f * R + 0.7152f * G + 0.0722f * B;         // option 1
+				//float Y = 0.299f * R + 0.587f * G + 0.114f * B;            // option 2
+				float Y = sqrtf(0.299f * R*R + 0.587f * G*G + 0.114f * B*B); // option 3
+				//float Y = (R+R+B+G+G+G)/6.0f;                              // option 4
+
+				if (Y < 0.2f) {
+					lambertianReflection(curand_uniform(randstate), curand_uniform(randstate), nextdir, nl);
+					hitpoint += nl * RAY_MIN;
+					mask *= kd * objcol;
+				} else {
+					bool refl;
+					Vec3f sampledNormal;
+					microfacetSampling(rd(randstate), rd(randstate), into, raydir, nl, refl, etaT, alphax, sampledNormal, beta, nextdir);
+					if (refl) {
+						hitpoint += nl * RAY_MIN;
+						mask *= beta * ks;
+					} else {
+						// material define
+						MediumSS med = MediumSS(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor;
+						Vec3f sigmaT = med.getSigmaT();
+						Vec3f &rho = objcol;
+						
+						// localize
+						Vec3f vx, vy;
+						localizeSample(nl, vx, vy);
+						
+						// sample probe ray and probing
+						int hitCount = 0;
+						int sampleAxis;
+						Vec3f probeRayOrig, probeRayDir, probeNormal, probeHitPoint[5], probeHitPointNormal[5];
+						Vec3f probeRayVec;
+						float probeRayLength;
+						float sampleRadius;
+						
+						while(hitCount == 0) {
+							sampleBSSRDFprobeRay(rd(randstate), rd(randstate), rd(randstate), rd(randstate), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, vx, vy, sampleAxis, sampleRadius);
+							for (int i = 0; i < 5; ++i) {
+								intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
+								if (probeRayLength < hitDistance) {
+									break;
+								}
+								Vec3f probeHitPointAny = probeRayOrig + probeRayDir * hitDistance;
+								probeRayVec = probeHitPointAny - hitpoint;
+								if (tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr)) == 4 && (probeRayVec.length() / sampleRadius) < 1.414f) {
+
+									probeHitPoint[hitCount] = probeHitPointAny;
+									Vec3f smoothNormal;
+									getSmoothTriangleNormal(smoothNormal, hitTriAddr, probeHitPointAny);
+									probeHitPointNormal[hitCount] = normalize(smoothNormal);
+
+									++hitCount;
+								}
+								probeRayLength -= hitDistance;
+								probeRayOrig = probeHitPointAny + RAY_MIN * probeRayDir;
+							}
+						}
+
+						if (hitCount == 0)
+							break;
+
+						// choose next point and sample next direction
+						int nextPointIdx = rd(randstate) * hitCount;
+						probeHitPointNormal[nextPointIdx].normalize();
+						lambertianReflection(rd(randstate), rd(randstate), nextdir, probeHitPointNormal[nextPointIdx]);
+
+						// calculate value
+						calculateBSSRDF(nl, probeHitPointNormal[nextPointIdx], nextdir, sigmaT, rho, etaT, beta, bssrdf, probeRayVec, vx, vy, sampleAxis, sampleRadius);
+						mask *= beta * kd * hitCount;
+
+						// small bias
+						hitpoint = probeHitPoint[nextPointIdx] + RAY_MIN * probeHitPointNormal[nextPointIdx];
+
+						// importance sampling
+						accucolor += mask * envLight(userSetting, nextdir);
+					}
+				}
+
 				break;
 			}
 			case MAT_NO: default: {
