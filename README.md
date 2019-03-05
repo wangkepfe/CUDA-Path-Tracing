@@ -2,37 +2,29 @@
 <table> <tr>
     <td> <img src="renderingResult/specularReflection.PNG" alt="Drawing" style="width: 200px;"/> </td>
     <td> <img src="renderingResult/lambertian.PNG" alt="Drawing" style="width: 200px;"/> </td>
-    </tr></table>
+</tr> <tr>
+    <td> <img src="renderingResult/plastic.PNG" alt="Drawing" style="width: 200px;"/> </td>
+    <td> <img src="renderingResult/microfacetReflection.PNG" alt="Drawing" style="width: 200px;"/> </td>
+</tr></table>
+
+
+
+
 <img src="renderingResult/specularReflection.PNG" width="200" style="float: right;">
-
 <img src="renderingResult/lambertian.PNG" width="200" style="float: right;">
-
 <img src="renderingResult/plastic.PNG" width="200" style="float: right;">
-
 <img src="renderingResult/microfacetReflection.PNG" width="200" style="float: right;">
-
 <img src="renderingResult/microfacetAnisotropic01.PNG" width="200" style="float: right;">
-
 <img src="renderingResult/microfacetAnisotropic02.PNG" width="200">
-
 <img src="renderingResult/fresnelBlend.PNG" width="200">
-
 <img src="renderingResult/specularGlass.PNG" width="200">
-
 <img src="renderingResult/roughGlass.PNG" width="200">
-
 <img src="renderingResult/mediumSmoke.PNG" width="200">
-
 <img src="renderingResult/mediumTea.PNG" width="200">
-
 <img src="renderingResult/mediumMilk.PNG" width="200">
-
 <img src="renderingResult/mediumJade.PNG" width="200">
-
 <img src="renderingResult/bssrdf50.PNG" width="200">
-
 <img src="renderingResult/bssrdf200.PNG" width="200">
-
 <img src="renderingResult/bssrdf800.PNG" width="200">
 
 # Library and external dependancy
