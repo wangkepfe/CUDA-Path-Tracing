@@ -1,19 +1,19 @@
 # Screenshots
 
 ### Specular reflection (Mirror)
-<img src="renderingResult/specularReflection.PNG" width="200">
+<img src="renderingResult/specularReflection.PNG" width="200" style="float: right;">
 
 ### Lambertian (Matte)
-<img src="renderingResult/lambertian.PNG" width="200">
+<img src="renderingResult/lambertian.PNG" width="200" style="float: right;">
 
 ### Lambertian + Microfacet reflection (Plastic)
-<img src="renderingResult/plastic.PNG" width="200">
+<img src="renderingResult/plastic.PNG" width="200" style="float: right;">
 
 ### Microfacet reflection (Metal)
-<img src="renderingResult/microfacetReflection.PNG" width="200">
+<img src="renderingResult/microfacetReflection.PNG" width="200" style="float: right;">
 
 ### Microfacet reflection (Brushed metal)
-<img src="renderingResult/microfacetAnisotropic01.PNG" width="200">
+<img src="renderingResult/microfacetAnisotropic01.PNG" width="200" style="float: right;">
 
 ### Microfacet reflection (Brushed metal)
 <img src="renderingResult/microfacetAnisotropic02.PNG" width="200">
