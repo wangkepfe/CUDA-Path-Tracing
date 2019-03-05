@@ -159,7 +159,7 @@ void createVBO(GLuint *vbo)
 void disp(void)
 {
 	static unsigned int lastSec = 0;
-	if (save_and_exit || lastSec >= 60) {
+	if (save_and_exit || lastSec >= 120) {
 		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
 		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
 		cudaThreadSynchronize();

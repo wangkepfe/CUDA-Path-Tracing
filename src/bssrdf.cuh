@@ -496,7 +496,7 @@ __device__ inline void calculateBSSRDFSoE(
     Vec3f radiusProjection(sqrtf(dLocal.y + dLocal.z), sqrtf(dLocal.z + dLocal.x), sqrtf(dLocal.x + dLocal.y));
 
     // pdf for each axis
-    Vec3f axisChannelPdf(abs(dot(ss, normalNext)), abs(dot(ts, normalNext)), abs(dot(ns, normalNext)));
+    Vec3f axisChannelPdf(abs(dot(ss, normalNext)) * 2.0f, abs(dot(ts, normalNext)) * 2.0f, abs(dot(ns, normalNext)));
 
     // preparation
     Vec3f scaledSigmaT = sigmaT / scaleFactor;
