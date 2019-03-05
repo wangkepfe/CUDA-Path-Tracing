@@ -1,51 +1,35 @@
 # Screenshots
 
-### Specular reflection (Mirror)
 <img src="renderingResult/specularReflection.PNG" width="200" style="float: right;">
 
-### Lambertian (Matte)
 <img src="renderingResult/lambertian.PNG" width="200" style="float: right;">
 
-### Lambertian + Microfacet reflection (Plastic)
 <img src="renderingResult/plastic.PNG" width="200" style="float: right;">
 
-### Microfacet reflection (Metal)
 <img src="renderingResult/microfacetReflection.PNG" width="200" style="float: right;">
 
-### Microfacet reflection (Brushed metal)
 <img src="renderingResult/microfacetAnisotropic01.PNG" width="200" style="float: right;">
 
-### Microfacet reflection (Brushed metal)
 <img src="renderingResult/microfacetAnisotropic02.PNG" width="200">
 
-### Fresnel blend reflection (Substrate/Coated metal)
 <img src="renderingResult/fresnelBlend.PNG" width="200">
 
-### Specular transmission (Glass)
 <img src="renderingResult/specularGlass.PNG" width="200">
 
-### Microfacet transmission (Frosted glass)
 <img src="renderingResult/roughGlass.PNG" width="200">
 
-### Medium no surface (Smoke)
 <img src="renderingResult/mediumSmoke.PNG" width="200">
 
-### Medium high absorption (Tea)
 <img src="renderingResult/mediumTea.PNG" width="200">
 
-### Medium high scattering (Milk)
 <img src="renderingResult/mediumMilk.PNG" width="200">
 
-### Medium (Jade)
 <img src="renderingResult/mediumJade.PNG" width="200">
 
-### BSSRDF (Skin, x50)
 <img src="renderingResult/bssrdf50.PNG" width="200">
 
-### BSSRDF (Skin, x200)
 <img src="renderingResult/bssrdf200.PNG" width="200">
 
-### BSSRDF (Skin, x800)
 <img src="renderingResult/bssrdf800.PNG" width="200">
 
 # Library and external dependancy
