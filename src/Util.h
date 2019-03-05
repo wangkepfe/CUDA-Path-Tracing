@@ -54,7 +54,7 @@ inline U32          floatToBits(F32 a)         { return *(U32*)&a; }
 inline int max1i(const int& a, const int& b){ return (a < b) ? b : a; }
 inline int min1i(const int& a, const int& b){ return (a > b) ? b : a; }
 inline float clamp(float x){ return x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x; }
-inline int toInt(float x){ return int(pow(clamp(x), 1 / 2.2) * 255 + .5); }
+inline int pixelToInt(float x){ return int(pow(clamp(x), 1 / 2.2) * 255 + .5); }
 
 	//------------------------------------------------------------------------
 
@@ -62,10 +62,12 @@ struct Clock {
 	unsigned firstValue;
 	Clock() { reset(); }
 	void reset() { firstValue = clock(); }
+	unsigned readS() { return (clock() - firstValue) / CLOCKS_PER_SEC; }
 	unsigned readMS() { return (clock() - firstValue) / (CLOCKS_PER_SEC / 1000); }
 };
   
 unsigned int WangHash(unsigned int a);
+void writeToPPM(const char* fname, int width, int height, Vec3f* accuBuffer, unsigned int frameNum);
 
 class Platform
 {

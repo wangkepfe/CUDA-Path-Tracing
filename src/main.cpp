@@ -10,6 +10,7 @@
 // gl
 #include <GL/glew.h>
 #include <GL/glut.h>
+#include <GL/freeglut.h>
 
 // c++
 #include <sstream>
@@ -113,7 +114,7 @@ cudaArray *gpuTextureArray = NULL;
 GLuint vbo;
 
 // frame number for progressive rendering
-int framenumber = 0;
+unsigned int framenumber = 0;
 
 // BVH
 int nodeSize = 0;
@@ -128,6 +129,8 @@ int triMaterialSize = 0;
 
 // cache bvh param
 bool nocachedBVH = false;
+
+Clock myClock;
 
 // gl timer
 void Timer(int obsolete)
@@ -155,11 +158,24 @@ void createVBO(GLuint *vbo)
 // display function called by glutMainLoop(), gets executed every frame
 void disp(void)
 {
+	static unsigned int lastSec = 0;
+	if (save_and_exit || lastSec >= 60) {
+		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
+		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
+		cudaThreadSynchronize();
+		writeToPPM("output.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
+		delete hostOutputBuffer;
+		glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE,GLUT_ACTION_CONTINUE_EXECUTION);
+		glutLeaveMainLoop();
+		return;
+	}
+
 	// if camera has moved, reset the accumulation buffer
 	if (buffer_reset)
 	{
 		cudaMemset(accumulatebuffer, 1, scrwidth * scrheight * sizeof(Vec3f));
 		framenumber = 0;
+		myClock.reset();
 	}
 
 	buffer_reset = false;
@@ -200,6 +216,12 @@ void disp(void)
 	glDrawArrays(GL_POINTS, 0, scrwidth * scrheight);
 	glDisableClientState(GL_VERTEX_ARRAY);
 
+	unsigned int ms = myClock.readMS();
+	if (ms/1000 != lastSec) {
+		lastSec = ms/1000;
+		printf("time: %ds, frame: %d, mspf: %d\n", lastSec, framenumber, ms/framenumber);
+	}
+	
 	glutSwapBuffers();
 }
 
@@ -613,6 +635,8 @@ void deleteCudaAndCpuMemory()
 	delete hostRendercam;
 	delete interactiveCamera;
 	delete gpuBVH;
+
+	std::cout << "Memory freed\n";
 }
 
 int main(int argc, char **argv)
@@ -690,9 +714,11 @@ int main(int argc, char **argv)
 	Timer(0);
 	createVBO(&vbo);
 	fprintf(stderr, "VBO created  \n");
+
 	// enter the main loop and start rendering
 	fprintf(stderr, "Entering glutMainLoop...  \n");
 	printf("Rendering started...\n");
+	myClock.reset();
 	glutMainLoop();
 
 	deleteCudaAndCpuMemory();

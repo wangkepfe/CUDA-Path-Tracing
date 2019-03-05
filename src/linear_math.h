@@ -90,7 +90,8 @@ struct Vec3f
 	inline __host__ __device__ const float& operator[](int i) const { return _v[i]; }
 };
 
-inline __host__ __device__ Vec3f operator*(float a, Vec3f& v){ return Vec3f(v.x*a, v.y*a, v.z*a); }
+inline __host__ __device__ Vec3f operator*(float a, const Vec3f& v) { return Vec3f(v.x * a, v.y * a, v.z * a); }
+inline __host__ __device__ Vec3f operator/(float a, const Vec3f& v) { return Vec3f(a / v.x, a / v.y, a / v.z); }
 inline __host__ __device__ Vec3f operator-(const Vec3f& v) { return Vec3f(-v.x, -v.y, -v.z); }
 inline __host__ __device__ Vec3f abs(const Vec3f& v) { return Vec3f(fabsf(v.x), fabsf(v.y), fabsf(v.z)); }
 inline __host__ __device__ Vec3f max(const Vec3f& v1, const Vec3f& v2) { return Vec3f(max1f(v1.x, v2.x), max1f(v1.y, v2.y), max1f(v1.z, v2.z)); }

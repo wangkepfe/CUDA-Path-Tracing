@@ -169,7 +169,7 @@ __device__ inline void HomogeneousMedium (
     int channel = r1 * 3.0f;
 
     // sample a distance along the ray
-    float dist = - logf(1.0f - r2) / sigmaT._v[channel];
+    float dist = - logf(1.0f - r2) / sigmaT[channel];
 
     // sampled medium or hit surface
     sampledMedium = dist < sceneT;
@@ -177,24 +177,23 @@ __device__ inline void HomogeneousMedium (
     // ray length
     float t =  min(sampledMedium ? dist : sceneT, 1e20f);
 
-    // transmission
+    // transmission (Beer's Law)
     Vec3f Tr = expf(sigmaT * (-1.f) *  t);
 
+    // scatter
     if (sampledMedium) {
-        // scatter
         hitpoint = rayorig + t * raydir;
         nextdir = HenyeyGreensteinSample(Vec2f(r3, r4), g, raydir);
         nextdir.normalize();
-        // absorb  
-        Vec3f density = sigmaT * Tr;
-        float pdf = (density._v[0] + density._v[1] + density._v[2]) / 3.0f;
-        color *= Tr * sigmaS / pdf;
-    } else {
-        // absorb
-        Vec3f density = Tr;
-        float pdf = (density._v[0] + density._v[1] + density._v[2]) / 3.0f;
-        color *= Tr / pdf;
     }
+
+    // absorption
+    Vec3f density = sampledMedium ? (sigmaT * Tr) : Tr;
+
+    float pdf = (density[0] + density[1] + density[2]) / 3.0f;
+    if (pdf < 1e-4) pdf = 1.0f;
+
+    color *= sampledMedium ? (Tr * sigmaS / pdf) : (Tr / pdf);
 }
 
 // --------------------------- microfacet -------------------------------------

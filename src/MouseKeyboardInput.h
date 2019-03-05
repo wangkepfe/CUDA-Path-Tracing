@@ -6,6 +6,7 @@
 InteractiveCamera* interactiveCamera = NULL;
 
 bool buffer_reset = false;
+bool save_and_exit = false;
 
 void initCamera()
 {
@@ -28,43 +29,43 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
 	switch (key) {
 
-	case(27) : exit(0);
+		case(27) : save_and_exit = true; break;
 
-	case(' ') : initCamera(); buffer_reset = true; break;
+		case(' ') : initCamera(); buffer_reset = true; break;
 
-	case('a') : interactiveCamera->strafe(-0.05f); buffer_reset = true; break;
-	case('d') : interactiveCamera->strafe(0.05f); buffer_reset = true; break;
+		case('a') : interactiveCamera->strafe(-0.05f); buffer_reset = true; break;
+		case('d') : interactiveCamera->strafe(0.05f); buffer_reset = true; break;
 
-	case('r') : interactiveCamera->changeAltitude(0.05f); buffer_reset = true; break;
-	case('f') : interactiveCamera->changeAltitude(-0.05f); buffer_reset = true; break;
+		case('r') : interactiveCamera->changeAltitude(0.05f); buffer_reset = true; break;
+		case('f') : interactiveCamera->changeAltitude(-0.05f); buffer_reset = true; break;
 
-	case('w') : interactiveCamera->goForward(0.05f); buffer_reset = true; break;
-	case('s') : interactiveCamera->goForward(-0.05f); buffer_reset = true; break;
+		case('w') : interactiveCamera->goForward(0.05f); buffer_reset = true; break;
+		case('s') : interactiveCamera->goForward(-0.05f); buffer_reset = true; break;
 
-	case('g') : interactiveCamera->changeApertureDiameter(0.1); buffer_reset = true; break;
-	case('h') : interactiveCamera->changeApertureDiameter(-0.1); buffer_reset = true; break;
+		case('g') : interactiveCamera->changeApertureDiameter(0.1); buffer_reset = true; break;
+		case('h') : interactiveCamera->changeApertureDiameter(-0.1); buffer_reset = true; break;
 
-	case('t') : interactiveCamera->changeFocalDistance(0.1); buffer_reset = true; break;
-	case('y') : interactiveCamera->changeFocalDistance(-0.1); buffer_reset = true; break;
+		case('t') : interactiveCamera->changeFocalDistance(0.1); buffer_reset = true; break;
+		case('y') : interactiveCamera->changeFocalDistance(-0.1); buffer_reset = true; break;
 
-	case('j') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx + 1) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
-	case('k') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx - 1 + TEST_MATERIAL_NUM) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
-	
-	case('z') : interactiveCamera->testTexture ^= 1;  buffer_reset = true; break;
-	case('x') : interactiveCamera->testNormal ^= 1;  buffer_reset = true; break;
-	case('c') : interactiveCamera->testLighting ^= 1;  buffer_reset = true; break;
+		case('j') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx + 1) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
+		case('k') : interactiveCamera->testMaterialIdx = (interactiveCamera->testMaterialIdx - 1 + TEST_MATERIAL_NUM) % TEST_MATERIAL_NUM;  buffer_reset = true; break;
+		
+		case('z') : interactiveCamera->testTexture ^= 1;  buffer_reset = true; break;
+		case('x') : interactiveCamera->testNormal ^= 1;  buffer_reset = true; break;
+		case('c') : interactiveCamera->testLighting ^= 1;  buffer_reset = true; break;
 
-	case('u') : interactiveCamera->testMaterialParam0 += 0.1f; buffer_reset = true; break;
-	case('i') : interactiveCamera->testMaterialParam0 -= 0.1f; buffer_reset = true; break;
+		case('u') : interactiveCamera->testMaterialParam0 += 0.1f; buffer_reset = true; break;
+		case('i') : interactiveCamera->testMaterialParam0 -= 0.1f; buffer_reset = true; break;
 
-	case('o') : interactiveCamera->testMaterialParam1 += 0.1f; buffer_reset = true; break;
-	case('p') : interactiveCamera->testMaterialParam1 -= 0.1f; buffer_reset = true; break;
+		case('o') : interactiveCamera->testMaterialParam1 += 0.1f; buffer_reset = true; break;
+		case('p') : interactiveCamera->testMaterialParam1 -= 0.1f; buffer_reset = true; break;
 
-	case('[') : interactiveCamera->testMaterialParam2 += 0.1f; buffer_reset = true; break;
-	case(']') : interactiveCamera->testMaterialParam2 -= 0.1f; buffer_reset = true; break;
+		case('[') : interactiveCamera->testMaterialParam2 += 0.1f; buffer_reset = true; break;
+		case(']') : interactiveCamera->testMaterialParam2 -= 0.1f; buffer_reset = true; break;
 
-	case(',') : interactiveCamera->saveToFile(); break;
-	case('.') : interactiveCamera->loadFromFile(); buffer_reset = true; break;
+		case(',') : interactiveCamera->saveToFile(); break;
+		case('.') : interactiveCamera->loadFromFile(); buffer_reset = true; break;
 	}
 }
 

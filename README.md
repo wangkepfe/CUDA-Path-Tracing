@@ -1,7 +1,7 @@
 # Screenshots
 
 ### Specular reflection (Mirror)
-<img src="renderingResult/specularReflection.PNG">
+<img src="renderingResult/specularReflection.PNG" width="200">
 
 ### Lambertian (Matte)
 <img src="renderingResult/lambertian.PNG">
