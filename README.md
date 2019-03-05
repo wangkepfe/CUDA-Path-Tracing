@@ -1,5 +1,8 @@
 # Screenshots
-
+ <tr>
+    <td> <img src="renderingResult/specularReflection.PNG" alt="Drawing" style="width: 200px;"/> </td>
+    <td> <img src="renderingResult/lambertian.PNG" alt="Drawing" style="width: 200px;"/> </td>
+    </tr>
 <img src="renderingResult/specularReflection.PNG" width="200" style="float: right;">
 
 <img src="renderingResult/lambertian.PNG" width="200" style="float: right;">
