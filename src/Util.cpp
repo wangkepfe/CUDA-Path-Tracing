@@ -15,7 +15,7 @@ void writeToPPM(const char* fname, int width, int height, Vec3f* accuBuffer, uns
     FILE *f = fopen(fname, "w");          
     fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
     for (int i = 0; i < width * height; i++) {
-		accuBuffer[i] /= frameNum;
+		accuBuffer[i] /= static_cast<float>(frameNum);
         fprintf(f, "%d %d %d ", pixelToInt(accuBuffer[i].x), pixelToInt(accuBuffer[i].y), pixelToInt(accuBuffer[i].z));
 	}
     fclose(f);

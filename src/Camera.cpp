@@ -12,56 +12,55 @@ InteractiveCamera::InteractiveCamera()
 	yaw = 0;
 	pitch = 0.3;
 	radius = 5;
-	apertureRadius = 0.0; 
+	apertureRadius = 0.0;
 	focalDistance = 1.0f;
 
-	resolution = Vec2f(scrwidth, scrheight);  
+	resolution = Vec2f(scrwidth, scrheight);
 	fov = Vec2f(40, 40);
 
 	envMapRotation = 0;
-	testMaterialIdx = 0;
-	testTexture = 1;
-	testNormal = 1;
-	testLighting = 1;
-
-	testMaterialParam0 = 0.1f;
-	testMaterialParam1 = 0.5f;
-	testMaterialParam2 = 0.5f;
 }
 
 InteractiveCamera::~InteractiveCamera() {}
 
-void InteractiveCamera::changeYaw(float m){
+void InteractiveCamera::changeYaw(float m)
+{
 	yaw += m;
 	fixYaw();
 }
 
-void InteractiveCamera::changePitch(float m){
+void InteractiveCamera::changePitch(float m)
+{
 	pitch += m;
 	fixPitch();
 }
 
-void InteractiveCamera::changeRadius(float m){
+void InteractiveCamera::changeRadius(float m)
+{
 	radius += radius * m; // Change proportional to current radius. Assuming radius isn't allowed to go to zero.
 	fixRadius();
 }
 
-void InteractiveCamera::changeAltitude(float m){
+void InteractiveCamera::changeAltitude(float m)
+{
 	centerPosition.y += m;
 	//fixCenterPosition();
 }
 
-void InteractiveCamera::goForward(float m){
+void InteractiveCamera::goForward(float m)
+{
 	centerPosition += viewDirection * m;
 }
 
-void InteractiveCamera::strafe(float m){
+void InteractiveCamera::strafe(float m)
+{
 	Vec3f strafeAxis = cross(viewDirection, Vec3f(0, 1, 0));
 	strafeAxis.normalize();
 	centerPosition += strafeAxis * m;
 }
 
-void InteractiveCamera::rotateRight(float m){
+void InteractiveCamera::rotateRight(float m)
+{
 	float yaw2 = yaw;
 	yaw2 += m;
 	float pitch2 = pitch;
@@ -72,40 +71,45 @@ void InteractiveCamera::rotateRight(float m){
 	viewDirection = directionToCamera * (-1.0);
 }
 
-void InteractiveCamera::changeApertureDiameter(float m){
+void InteractiveCamera::changeApertureDiameter(float m)
+{
 	apertureRadius += (apertureRadius + 0.01) * m; // Change proportional to current apertureRadius.
 	fixApertureRadius();
 }
 
-
-void InteractiveCamera::changeFocalDistance(float m){
+void InteractiveCamera::changeFocalDistance(float m)
+{
 	focalDistance += m;
 	fixFocalDistance();
 }
 
-
-void InteractiveCamera::setResolution(float x, float y){
+void InteractiveCamera::setResolution(float x, float y)
+{
 	resolution = Vec2f(x, y);
 	setFOVX(fov.x);
 }
 
-float radiansToDegrees(float radians) {
+float radiansToDegrees(float radians)
+{
 	float degrees = radians * 180.0 / M_PI;
 	return degrees;
 }
 
-float degreesToRadians(float degrees) {
+float degreesToRadians(float degrees)
+{
 	float radians = degrees / 180.0 * M_PI;
 	return radians;
 }
 
-void InteractiveCamera::setFOVX(float fovx){
+void InteractiveCamera::setFOVX(float fovx)
+{
 	fov.x = fovx;
 	fov.y = radiansToDegrees(atan(tan(degreesToRadians(fovx) * 0.5) * (resolution.y / resolution.x)) * 2.0);
 	// resolution float division
 }
 
-void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
+void InteractiveCamera::buildRenderCamera(Camera *renderCamera)
+{
 	float xDirection = sin(yaw) * cos(pitch);
 	float yDirection = sin(pitch);
 	float zDirection = cos(yaw) * cos(pitch);
@@ -123,71 +127,77 @@ void InteractiveCamera::buildRenderCamera(Camera* renderCamera){
 	renderCamera->focalDistance = focalDistance;
 
 	renderCamera->envMapRotation = envMapRotation;
-	renderCamera->testMaterialIdx = testMaterialIdx;
-	renderCamera->testTexture = testTexture;
-	renderCamera->testNormal = testNormal;
-	renderCamera->testLighting = testLighting;
-
-	renderCamera->testMaterialParam0 = testMaterialParam0;
-	renderCamera->testMaterialParam1 = testMaterialParam1;
-	renderCamera->testMaterialParam2 = testMaterialParam2;
 }
 
-float mod(float x, float y) { // Does this account for -y ???
+float mod(float x, float y)
+{ // Does this account for -y ???
 	return x - y * floorf(x / y);
 }
 
-void InteractiveCamera::fixYaw() {
+void InteractiveCamera::fixYaw()
+{
 	yaw = mod(yaw, 2 * M_PI); // Normalize the yaw.
 }
 
-float clamp2(float n, float low, float high) {
+float clamp2(float n, float low, float high)
+{
 	n = fminf(n, high);
 	n = fmaxf(n, low);
 	return n;
 }
 
-void InteractiveCamera::fixPitch() {
+void InteractiveCamera::fixPitch()
+{
 	float padding = 0.05;
 	pitch = clamp2(pitch, -PI_OVER_TWO + padding, PI_OVER_TWO - padding); // Limit the pitch.
 }
 
-void InteractiveCamera::fixRadius() {
+void InteractiveCamera::fixRadius()
+{
 	float minRadius = 0.2;
 	float maxRadius = 100.0;
 	radius = clamp2(radius, minRadius, maxRadius);
 }
 
-void InteractiveCamera::fixApertureRadius() {
+void InteractiveCamera::fixApertureRadius()
+{
 	float minApertureRadius = 0.0;
 	float maxApertureRadius = 25.0;
 	apertureRadius = clamp2(apertureRadius, minApertureRadius, maxApertureRadius);
 }
 
-void InteractiveCamera::fixFocalDistance() {
+void InteractiveCamera::fixFocalDistance()
+{
 	float minFocalDist = 0.2;
 	float maxFocalDist = 100.0;
 	focalDistance = clamp2(focalDistance, minFocalDist, maxFocalDist);
 }
 
-const char* cameraFileName = "data/cameraSettings.cam";
-
-void InteractiveCamera::saveToFile() {
+void InteractiveCamera::saveToFile(const std::string &camFileName)
+{
 	using namespace std;
-	ofstream myfile(cameraFileName, std::ofstream::out | std::ofstream::binary | std::ofstream::trunc);
-	if (myfile.is_open()) {
-		myfile.write(reinterpret_cast<char*>(this), sizeof(InteractiveCamera));
+	ofstream myfile(camFileName, std::ofstream::out | std::ofstream::binary | std::ofstream::trunc);
+	if (myfile.is_open())
+	{
+		myfile.write(reinterpret_cast<char *>(this), sizeof(InteractiveCamera));
 		myfile.close();
 	}
 }
 
-void InteractiveCamera::loadFromFile() {
+void InteractiveCamera::loadFromFile(const std::string &camFileName)
+{
 	using namespace std;
-	ifstream infile(cameraFileName, std::ifstream::in | std::ifstream::binary);
-  	char* buffer = new char[sizeof(InteractiveCamera)];
-    infile.read (buffer, sizeof(InteractiveCamera));
-	*this = *reinterpret_cast<InteractiveCamera*>(buffer);
-  	delete[] buffer;
-  	infile.close();
+	if (camFileName.empty())
+		return;
+	ifstream infile(camFileName, std::ifstream::in | std::ifstream::binary);
+	if (infile.good())
+	{
+		char *buffer = new char[sizeof(InteractiveCamera)];
+		infile.read(buffer, sizeof(InteractiveCamera));
+		*this = *reinterpret_cast<InteractiveCamera *>(buffer);
+		delete[] buffer;
+		infile.close();
+	} else {
+		cout << "Cam file " << camFileName.c_str() << " read fail. Use default instead.\n";
+	}
 }
-

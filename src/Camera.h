@@ -14,17 +14,8 @@ struct Camera {
 	Vec2f fov;
 	float apertureRadius;
 	float focalDistance;
-
+	
 	float envMapRotation;
-
-	int testMaterialIdx;
-	int testTexture;
-	int testNormal;
-	int testLighting;
-
-	float testMaterialParam0;
-	float testMaterialParam1;
-	float testMaterialParam2;
 };
 
 // class for interactive camera object, updated on the CPU for each frame and copied into Camera struct
@@ -39,7 +30,6 @@ public:
 	float radius;
 	float apertureRadius;
 	float focalDistance;
-	
 
 	void fixYaw();
 	void fixPitch();
@@ -63,18 +53,10 @@ public:
 
 	void buildRenderCamera(Camera* renderCamera);
 
-	void saveToFile();
-	void loadFromFile();
+	void saveToFile(const std::string &camFileName);
+	void loadFromFile(const std::string &camFileName);
 
 	float envMapRotation;
-	int testMaterialIdx;
-	int testTexture;
-	int testNormal;
-	int testLighting;
-
-	float testMaterialParam0;
-	float testMaterialParam1;
-	float testMaterialParam2;
 
 	Vec2f resolution;
 	Vec2f fov;

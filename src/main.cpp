@@ -55,13 +55,18 @@
 // cuda kernal
 #include "CudaRenderKernel.h"
 
-// user input (hard coded)
-//const std::string scenefile = "data/TestObj.obj";
-const std::string HDRmapname = "data/pisa.hdr";
-//const std::string textureFile = "data/Checker.png";
+#define NO_CACHE_MODE false
 
-const std::string scenefile = "data/head.ply";
-const std::string textureFile = "data/head_albedomap.png";
+// scene file / textures input
+// const std::string HDRmapname = "data/pisa.hdr";
+// const std::string scenefile = "data/head.ply";
+// const std::string textureFile = "data/head_albedomap.png";
+
+const std::string HDRmapname = "data/pisa.hdr";
+const std::string scenefile = "data/testbox2.obj";
+const std::string textureFile = "data/uv.png";
+const std::string camFile = "data/testBox.cam";
+unsigned int timeout = 1200000;
 
 // BVH
 Vec4i *cpuNodePtr = NULL;
@@ -159,16 +164,6 @@ void createVBO(GLuint *vbo)
 void disp(void)
 {
 	static unsigned int lastSec = 0;
-	if (save_and_exit || lastSec >= 120) {
-		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
-		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
-		cudaThreadSynchronize();
-		writeToPPM("output.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
-		delete hostOutputBuffer;
-		glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE,GLUT_ACTION_CONTINUE_EXECUTION);
-		glutLeaveMainLoop();
-		return;
-	}
 
 	// if camera has moved, reset the accumulation buffer
 	if (buffer_reset)
@@ -220,6 +215,18 @@ void disp(void)
 	if (ms/1000 != lastSec) {
 		lastSec = ms/1000;
 		printf("time: %ds, frame: %d, mspf: %d\n", lastSec, framenumber, ms/framenumber);
+	}
+
+	if (save_and_exit || lastSec >= timeout) {
+		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
+		cudaDeviceSynchronize();
+		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
+		cudaDeviceSynchronize();
+		writeToPPM("output.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
+		delete hostOutputBuffer;
+		glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE,GLUT_ACTION_CONTINUE_EXECUTION);
+		glutLeaveMainLoop();
+		return;
 	}
 	
 	glutSwapBuffers();
@@ -550,7 +557,7 @@ void createBVH()
 				newtri.normal[j] = vN[vIdx[i][j]];
 			}
 			tris.add(newtri);
-			matIds.push_back(4);
+			matIds.push_back(0);
 		}
 
 		totalVertPosCount = plyVert->count;
@@ -641,11 +648,11 @@ void deleteCudaAndCpuMemory()
 
 int main(int argc, char **argv)
 {
-	// create a CPU camera
+	// camera
 	hostRendercam = new Camera();
-	// initialise an interactive camera on the CPU side
 	initCamera();
 	interactiveCamera->buildRenderCamera(hostRendercam);
+	interactiveCamera->loadFromFile(camFile);
 
 	std::string BVHcacheFilename(scenefile.c_str());
 	BVHcacheFilename += ".bvh";
@@ -656,8 +663,11 @@ int main(int argc, char **argv)
 		nocachedBVH = true;
 	}
 
-	//if (true) {   // overrule cache
+	#if NO_CACHE_MODE
+	if (true) {   // overrule cache
+	#else
 	if (nocachedBVH) {
+	#endif
 		std::cout << "No cached BVH file available\nCreating new BVH...\n";
 		// initialise all data needed to start rendering (BVH data, triangles, vertices)
 		createBVH();

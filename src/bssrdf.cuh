@@ -236,7 +236,7 @@ __device__ inline void sampleBSSRDFprobeRay (
     Vec3f& normal, Vec3f& hitpoint,
     Vec3f sigmaT, Vec3f& rho,
     Vec3f& probeRayOrig, Vec3f& probeRayDir, float& probeRayLength, 
-    BSSRDF& table, Vec3f& vx, Vec3f& vy, int& sampleAxis, float& sampleRadius) {
+    BSSRDF& table, Vec3f& vx, Vec3f& vy, float& sampledRadius) {
 
     // probe ray direction
     Vec3f probex, probey;
@@ -244,17 +244,14 @@ __device__ inline void sampleBSSRDFprobeRay (
         probeRayDir = vx;
         probex = normal;
         probey = vy;
-        sampleAxis = 0;
     } else if (r4 < 0.5f) {
         probeRayDir = vy;
         probex = vx;
         probey = normal;
-        sampleAxis = 1;
     } else {
         probeRayDir = normal;
         probex = vx;
         probey = vy;
-        sampleAxis = 2;
     }
     
     // sample a channel (r g b)
@@ -271,7 +268,7 @@ __device__ inline void sampleBSSRDFprobeRay (
     probeRayLength = 2.0f * sqrtf(radiusMax * radiusMax - radius * radius);
     probeRayOrig = hitpoint + radius * (probex * cos(phi) + probey * sin(phi)) - probeRayLength * probeRayDir * 0.5f;
 
-    sampleRadius = radius;
+    sampledRadius = radius;
 
     // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
     // if (threadId == 460800) {
@@ -305,10 +302,10 @@ __device__ inline float FrSh(float F0, float cosTheta) {
 }
 
 __device__ inline void calculateBSSRDF( 
-        const Vec3f& ns, const Vec3f& normalNext, const Vec3f& nextDir,
-        const Vec3f& sigmaT, const Vec3f& rho, const float eta,
+        const Vec3f& ns, const Vec3f& normalNext,
+        const Vec3f& sigmaT, const Vec3f& rho,
         Vec3f& beta, const BSSRDF& table, const Vec3f& d,
-        const Vec3f& ss, const Vec3f& ts, const float scaleFactor, const int sampleAxis, const float sampleRadius)
+        const Vec3f& ss, const Vec3f& ts, const float scaleFactor)
 {
     // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
@@ -319,25 +316,22 @@ __device__ inline void calculateBSSRDF(
 
     float radiusProjection[3] = { sqrtf(dLocal.y + dLocal.z), sqrtf(dLocal.z + dLocal.x), sqrtf(dLocal.x + dLocal.y) };
 
+    // float axisChannelPdf[3] = {
+    //     abs(dot(ss, normalNext)) * 0.08333333333f,  // 0.25 / 3
+    //     abs(dot(ts, normalNext)) * 0.08333333333f,  // 0.25 / 3
+    //     abs(dot(ns, normalNext)) * 0.16666666666f   // 0.5 / 3
+    // };
+
     float axisChannelPdf[3] = {
-        abs(dot(ss, normalNext)) * 0.08333333333f,  // 0.25 / 3
-        abs(dot(ts, normalNext)) * 0.08333333333f,  // 0.25 / 3
-        abs(dot(ns, normalNext)) * 0.16666666666f   // 0.5 / 3
+        abs(dot(ss, normalNext)) * 0.16666666666f,  // 0.25 / 3
+        abs(dot(ts, normalNext)) * 0.16666666666f,  // 0.25 / 3
+        abs(dot(ns, normalNext)) * 0.33333333333f   // 0.5 / 3
     };
 
     Vec3f scaledSigmaT = sigmaT / scaleFactor;
     Vec3f sigmaT2 = scaledSigmaT * scaledSigmaT;
 
     Vec3f d_direction = normalize(d);
-
-    // if (threadId == 460800) {
-    //     printf("BSSRDF: entering kernel ......\n");
-    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
-    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
-    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
-    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f)\n", radiusProjection[0], radiusProjection[1], radiusProjection[2]);
-    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
-    // }
 
     float pdf = 0.0f;
     for (int axis = 0; axis < 3; ++axis) {
@@ -406,9 +400,16 @@ __device__ inline void calculateBSSRDF(
         Sr[ch] = max(0.0f, sr * sigmaT2[ch]);
     }
 
-    float outS = (1 - FrD(dot(nextDir, normalNext), 1.0f, eta)) / (1.0f - 2.0f * FM1(1.0f / eta));
+    beta = min3f(Sr / pdf, Vec3f(5.0f));
 
-    beta = Sr / pdf * outS;
+    // if (threadId == 460800) {
+    //     printf("BSSRDF: entering kernel ......\n");
+    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
+    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
+    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f)\n", radiusProjection[0], radiusProjection[1], radiusProjection[2]);
+    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
+    // }
 
     // if (threadId == 460800) {
     //     printf("BSSRDF: rProj = (%.5f, %.5f, %.5f), radius = %.5f\n", radiusProjection[0], radiusProjection[1], radiusProjection[2], radius);
@@ -422,24 +423,24 @@ __device__ inline void calculateBSSRDF(
 template <typename T>
 __device__ inline T paramSoE(const T& A) {
     // search light configuration
-    // T p = abs(A - T(0.8f));
-    // return T(1.85f) - A + 7.0f * p * p * p;
+    T p = abs(A - T(0.8f));
+    return T(1.85f) - A + 7.0f * p * p * p;
 
     // diffuse configuration
     // T p = A - T(0.8f);
     // return T(1.9f) - A + 3.5f * p * p;
 
     // search light configuration with dmfp to d
-    T p = A - T(0.33f); 
-    p = p * p;
-    return T(3.5f) + 100.0f * p * p;
+    // T p = A - T(0.33f); 
+    // p = p * p;
+    // return T(3.5f) + 100.0f * p * p;
 }
 
 __device__ inline void sampleBSSRDFprobeRaySoE(
     float r1, float r2, float r3, float r4, float r5,
     Vec3f& normal, Vec3f& hitpoint, Vec3f sigmaT, Vec3f& rho,
     Vec3f& probeRayOrig, Vec3f& probeRayDir, float& probeRayLength, 
-    Vec3f& vx, Vec3f& vy, int& sampleAxis, float& sampleRadius) {
+    Vec3f& vx, Vec3f& vy, float& sampledRadius) {
 
     // probe ray direction
     Vec3f probex, probey;
@@ -447,17 +448,14 @@ __device__ inline void sampleBSSRDFprobeRaySoE(
         probeRayDir = vx;
         probex = normal;
         probey = vy;
-        sampleAxis = 0;
     } else if (r4 < 0.5f) {
         probeRayDir = vy;
         probex = vx;
         probey = normal;
-        sampleAxis = 1;
     } else {
         probeRayDir = normal;
         probex = vx;
         probey = vy;
-        sampleAxis = 2;
     }
     
     // sample a channel (r g b)
@@ -466,7 +464,7 @@ __device__ inline void sampleBSSRDFprobeRaySoE(
     // sample radius, radiusMax
     float s = paramSoE(rho[ch]);
     float radius = - logf(1.0f - r2 * 0.99f) / sigmaT[ch] / s;
-    float radiusMax =  - logf(1.0f - 0.99f) / sigmaT[ch] / s;
+    float radiusMax =  - logf(0.01f) / sigmaT[ch] / s;
     if (r5 < 0.5f) {
         radius *= 3.0f;
         radiusMax *= 3.0f;
@@ -476,14 +474,13 @@ __device__ inline void sampleBSSRDFprobeRaySoE(
     // probe ray
     probeRayLength = 2.0f * sqrtf(radiusMax * radiusMax - radius * radius);
     probeRayOrig = hitpoint + radius * (probex * cos(phi) + probey * sin(phi)) - probeRayLength * probeRayDir * 0.5f;
-
-    sampleRadius = radius;
+    sampledRadius = radius;
 }
 
 __device__ inline void calculateBSSRDFSoE( 
-    const Vec3f& ns, const Vec3f& normalNext, const Vec3f& nextDir,
-    const Vec3f& sigmaT, const Vec3f& rho, const float eta, Vec3f& beta, const Vec3f& d,
-    const Vec3f& ss, const Vec3f& ts, const float scaleFactor, const int sampleAxis, const float sampleRadius)
+    const Vec3f& ns, const Vec3f& normalNext,
+    const Vec3f& sigmaT, const Vec3f& rho, Vec3f& beta, const Vec3f& d,
+    const Vec3f& ss, const Vec3f& ts, const float scaleFactor)
 {
     // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
@@ -496,64 +493,44 @@ __device__ inline void calculateBSSRDFSoE(
     Vec3f radiusProjection(sqrtf(dLocal.y + dLocal.z), sqrtf(dLocal.z + dLocal.x), sqrtf(dLocal.x + dLocal.y));
 
     // pdf for each axis
-    Vec3f axisChannelPdf(abs(dot(ss, normalNext)) * 2.0f, abs(dot(ts, normalNext)) * 2.0f, abs(dot(ns, normalNext)));
+    Vec3f axisChannelPdf(abs(dot(ss, normalNext)) / 4.0f, abs(dot(ts, normalNext)) / 4.0f, abs(dot(ns, normalNext) / 2.0f));
+    axisChannelPdf *= 2.0f;
 
     // preparation
-    Vec3f scaledSigmaT = sigmaT / scaleFactor;
-    Vec3f sigmaT2 = scaledSigmaT * scaledSigmaT;
-    Vec3f sigmaT3 = sigmaT2 * scaledSigmaT;
     Vec3f d_direction = normalize(d);
     Vec3f s = paramSoE(rho);
-    Vec3f rOptical;
-
-    // if (threadId == 460800) {
-    //     printf("BSSRDF: entering kernel ......\n");
-    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
-    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
-    //     printf("BSSRDF: sampleAxis = %d, sampleRadius = %.5f\n", sampleAxis, sampleRadius);
-    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
-    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f), radius = %.5f\n", radiusProjection[0], radiusProjection[1], radiusProjection[2], radius);
-    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
-    // }
 
     // sum pdf
     float pdf = 0.0f;
-    int axis = sampleAxis;
-    //for (int axis = 0; axis < 3; ++axis) {
-        //rOptical = radiusProjection[axis] * sigmaT;
-        rOptical = sampleRadius * sigmaT;
-        //Vec3f axisPdf = (expf(- s * rOptical) + expf(- s * rOptical / 3.0f) / 3.0f) * scaledSigmaT * rho * s / radiusProjection[axis];
-        Vec3f axisPdf = (expf(- s * rOptical) + expf(- s * rOptical / 3.0f) / 3.0f) * scaledSigmaT * rho * s / sampleRadius;
-    // for (int ch = 0; ch < 3; ++ch) {
-    //     if (radiusProjection[axis] > 1e-6f) {
-    //         axisPdf[ch] /= radiusProjection[axis];
-    //     }
-    // } 
+    for (int axis = 0; axis < 3; ++axis) {
+        Vec3f axisPdf = (expf(- s * radiusProjection[axis] * sigmaT) + expf(- s * radiusProjection[axis] * sigmaT / 3.0f) / 3.0f) * sigmaT * rho * s;
+        if (radiusProjection[axis] > 1e-5f) {
+            axisPdf /= radiusProjection[axis];
+        }
         pdf += (axisPdf.x + axisPdf.y + axisPdf.z) / 3.0f * axisChannelPdf[axis];
-        // if (threadId == 460800) {
-        //     printf("BSSRDF: axis = %d, rOptical = (%.5f, %.5f, %.5f), axis pdf = (%.5f, %.5f, %.5f), axis pdf = %.5f\n", 
-        //     axis, rOptical.x, rOptical.y, rOptical.z, axisPdf.x, axisPdf.y, axisPdf.z, (axisPdf.x + axisPdf.y + axisPdf.z) * axisChannelPdf[axis]);
-        // }
-    //}
+    }
     
     // S(r)
-    rOptical = radius * sigmaT;
-    Vec3f Sr = (expf(- s * rOptical) + expf(- s * rOptical / 3.0f)) / 2.0f * scaledSigmaT * rho * s / radius;
-    // for (int ch = 0; ch < 3; ++ch) {
-    //     if (radius > 1e-6f) {
-    //         Sr[ch] /= radius;
-    //     }
-    // }
+    Vec3f Sr = (expf(- s * radius * sigmaT) + expf(- s * radius * sigmaT / 3.0f)) / 2.0f * sigmaT * rho * s;
+    if (radius > 1e-5f) {
+        Sr /= radius;
+    }
     
-    // S_out(wi)
-    float outS = (1.0f - FrD(dot(nextDir, normalNext), 1.0f, eta)) / (1.0f - 2.0f * FM1(1.0f / eta));
-
     // color mask
-    beta = min3f(Sr / pdf * outS, Vec3f(2.0f));
+    beta = min3f(Sr / pdf, Vec3f(5.0f));
 
-    // if (threadId == 460800) {
-    //     printf("BSSRDF: pdf = %.5f, rOptical = (%.5f, %.5f, %.5f), Sr = (%.5f, %.5f, %.5f), outS = %.5f, beta = (%.5f, %.5f, %.5f)\n", 
-    //     pdf, rOptical.x, rOptical.y, rOptical.z, Sr.x, Sr.y, Sr.z, outS, beta.x, beta.y, beta.z);
+    // threadId == 460800
+    // if (threadId > 300000 && threadId < 700000 && beta.x < 0.01f) {
+    //     printf("BSSRDF: threadId = %d\n", threadId);
+    //     printf("BSSRDF: entering kernel ......\n");
+    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
+    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
+    //     // printf("BSSRDF: sampleAxis = %d, sampledRadius = %.5f\n", sampleAxis, sampledRadius);
+    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f), radius = %.5f\n", radiusProjection[0], radiusProjection[1], radiusProjection[2], radius);
+    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
+    //     printf("BSSRDF: pdf = %.5f, Sr = (%.5f, %.5f, %.5f), outS = %.5f, beta = (%.5f, %.5f, %.5f)\n", 
+    //     pdf, Sr.x, Sr.y, Sr.z, outS, beta.x, beta.y, beta.z);
     //     printf("\n\n");
     // }
 }

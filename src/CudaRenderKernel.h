@@ -8,6 +8,7 @@
 
 #include "Camera.h"
 #include "bssrdfTable.h"
+// #include "SceneDescription.h"
 
 #define scrwidth 1280
 #define scrheight 720
