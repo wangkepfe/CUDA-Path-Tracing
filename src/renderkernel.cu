@@ -43,18 +43,17 @@
 #define EntrypointSentinel 0x76543210
 
 // limits
-#define RAY_MIN 1e-5f
+#define RAY_MIN 1e-7f
 #define RAY_MAX 1e20f
-#define M_EPSILON 1e-5f
-#define SCENE_MAX 1e5f
+#define M_EPSILON 1e-7f
 
 // sampling settings
 #define NUM_SAMPLE 1
 #define USE_RUSSIAN false
 #define RUSSIAN_P 0.98
-#define LIGHT_BOUNCE 8
-#define USE_SOE true
-#define USE_ENVMAP false
+#define LIGHT_BOUNCE 3
+#define USE_ENVMAP true
+#define USE_DISTANT_LIGHT false
 
 // ******************* structures ********************
 
@@ -541,6 +540,12 @@ __device__ Vec3f renderKernel(
 	int objMedium = MEDIUM_NO;
 	int bssrdfMatId = -1;
 
+	// distant light
+	#if USE_DISTANT_LIGHT
+	Vec3f Ldis = Vec3f(1.2f, 1.2f, 1.2f);
+	Vec3f Ddis = normalize(Vec3f(0.0f, 1.3f, -3.6f));
+	#endif
+
 	for (int bounces = 0; 
 		#if USE_RUSSIAN == true
 		rd(rdState) < RUSSIAN_P && bounces < LIGHT_BOUNCE;
@@ -565,7 +570,7 @@ __device__ Vec3f renderKernel(
 			alphay = 0.0f;
 			kd = 1.0f;
 			ks = 1.0f;
-			etaT = 1.4f;
+			etaT = 1.33f;
 			useTexture = false;
 			useNormal = true;
 			F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
@@ -592,7 +597,7 @@ __device__ Vec3f renderKernel(
  
 
 		#if 0
-		GroundPlane gp {-10.0f};
+		GroundPlane gp {0.0f};
 		hitDistance = gp.intersect(Ray(rayorig, raydir));
 		if (hitDistance < sceneT && hitDistance > RAY_MIN) {
 			sceneT = hitDistance;
@@ -654,19 +659,21 @@ __device__ Vec3f renderKernel(
 			textureFetching(smoothNormal, colorTex, hitTriAddr, hitpoint);
 
 			// ---------- material description ----------
-			// ----- bssrdf face -----
 			refltype = MAT_SUBSURFACE; 
-			alphax = 0.5f; 
-			F0 = Vec3f(0.04f);
-			scaleFactor = 100.0f;
+			alphax = 0.3f;
 			bssrdfMatId = materialId;
-			objcol = Medium(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f).getRho();
+			useTexture = true;
+			useNormal = true;
 
 			if (useTexture) { objcol = colorTex; } 
 			if (useNormal)  { n = smoothNormal; } 
 		}
 		else if (geometryType == GEO_GROUND) {
+			// ---------- material description ----------
 			refltype = MAT_DIFF;
+			Vec2f uv = Vec2f(hitpoint.x, hitpoint.z) * 0.25f;
+			float4 colorTex = tex2D(colorTexture, uv.x, uv.y);
+			objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
 		}
 		else if (geometryType == GEO_SPHERE) {
 			refltype = MAT_DIFF;
@@ -683,18 +690,39 @@ __device__ Vec3f renderKernel(
 		// ------------------------ material ----------------------------
 		switch (refltype) {
 			case MAT_DIFF: {
-				if (hitpoint.x * hitpoint.x + hitpoint.z * hitpoint.z < 0.1f && hitpoint.y > 0) {
-					Vec3f lightDir = Vec3f(0.0f, 1.0f, 0.0f);
-					Vec3f Li = Vec3f(1.0f, 1.0f, 1.0f);
-					Vec3f f = objcol * invPi;
-					float lightPdf = 1.0f;
-					float scatteringPdf = abs(dot(lightDir, nl)) * invPi;
-					accucolor += f * Li * (scatteringPdf + lightPdf) / (scatteringPdf * scatteringPdf + lightPdf * lightPdf);
-				}
-				
+				// beta = f * cosTh / pdf
 				lambertianReflection(rd(rdState), rd(rdState), nextdir, nl);
 				hitpoint += nl * RAY_MIN;
 				mask *= kd * objcol;
+
+				// ----- importance sampling -----
+				#if USE_DISTANT_LIGHT
+				if (dot(Ddis, nl) < 0) {
+					break;
+				}
+
+				// shadow ray probe
+				Vec3f shadowRayOrig = hitpoint;
+				Vec3f shadowRayDir = Ddis;
+				Vec3f probeNormal;
+
+				intersectBVHandTriangles(make_float4(shadowRayOrig.x, shadowRayOrig.y, shadowRayOrig.z, 
+					RAY_MIN), make_float4(shadowRayDir.x,  shadowRayDir.y,  shadowRayDir.z,  
+						RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
+
+				// in shadow
+				if (hitDistance < 1e10f) {
+					break;
+				}
+
+				// distant light
+				Vec3f f = objcol * invPi;
+				float lightPdf = 1.0f;
+				float scatteringPdf = abs(dot(Ddis, nl)) * invPi;
+				float weightFactor = (scatteringPdf + lightPdf) / (scatteringPdf * scatteringPdf + lightPdf * lightPdf);
+				accucolor += mask * f * Ldis * weightFactor;
+				#endif
+
 				break;
 			}
 			case MAT_REFL: {
@@ -739,15 +767,6 @@ __device__ Vec3f renderKernel(
 					if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
 				} else {
 					// microfacet glass
-					if (hitpoint.x * hitpoint.x + hitpoint.z * hitpoint.z < 0.1f && hitpoint.y > 0) {
-						Vec3f lightDir = Vec3f(0.0f, 1.0f, 0.0f);
-						Vec3f Li = Vec3f(1.0f, 1.0f, 1.0f);
-						Vec3f f = objcol * invPi;
-						float lightPdf = 1.0f;
-						float scatteringPdf = abs(dot(lightDir, nl)) * invPi;
-						accucolor += f * Li * (scatteringPdf + lightPdf) / (scatteringPdf * scatteringPdf + lightPdf * lightPdf);
-					}
-
 					bool refl;
 					macrofacetGlass(rd(rdState), rd(rdState), rd(rdState), into, beta, raydir, nextdir, nl, refl, etaT, alphax);
 					hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
@@ -766,7 +785,7 @@ __device__ Vec3f renderKernel(
 				if (airMedium != objMedium) medium = (medium == airMedium) ? (!into ? airMedium : objMedium) : (!into ? objMedium : airMedium);
 				break;
 			}
-			case MAT_SUBSURFACE: {	
+			case MAT_SUBSURFACE: {
 				bool refl;
 				Vec3f sampledNormal;
 				microfacetSampling(rd(rdState), rd(rdState), into, raydir, nl, refl, etaT, alphax, sampledNormal, beta, nextdir);
@@ -776,127 +795,150 @@ __device__ Vec3f renderKernel(
 					break;
 				}
 
-				// material define
-				#if USE_SOE
-				Vec3f rho = objcol;
-				#else
-				Vec3f rho = SubsurfaceFromDiffuse(bssrdf, objcol);
-				#endif
+				//Vec3f normal2 = nl;
+				Vec3f normal2 = sampledNormal;
 
-				Medium med = Medium(Vec3f{0.74, 0.88, 1.01}, Vec3f{0.032, 0.17, 0.48}, 0.0f) * scaleFactor;
-				Vec3f sigmaT = med.getSigmaT();
+				// material define
+				// Vec3f rho = Vec3f(0.98, 0.85, 0.6);
+				//Vec3f rho = SubsurfaceFromDiffuse(bssrdf, objcol);
+				Vec3f rho = objcol;
+				//rho *= Vec3f(1.001f, 0.9999f, 0.9995f);
+				//rho = min3f(rho, Vec3f(1.0f));
+				//Vec3f rho = Vec3f(0.99, 0.35, 0.1);
+				Vec3f mfp = Vec3f(1.3, 0.4, 0.2) * 0.001f;
+				//Vec3f mfp = Vec3f(1.3, 0.95238, 0.67114) * 0.001f;
+				Vec3f sigmaT = 1.0 / mfp;
 
 				// localize
 				Vec3f vx, vy;
-				localizeSample(nl, vx, vy);
+				localizeSample(normal2, vx, vy);
 				
 				// sample probe ray and probing
-				const unsigned int maxSurfaceHit = 1;
-				const float maxRatio = 1.4f;
-				const float minNormalDot = 0.5f;
-				int hitCount = 0;
-				float sampledRadius;
-
+				const float maxRatio = 10.0f;
+				const float minNormalDot = 0.1f;
+				int hitCount = 0, hitCountPerProbe, probeHitCount;
+				bool selectThisProbeRay = false, needNewProbeRay = true;
+				float sampledRadius, probeRayLength;
 				Vec3f probeRayOrig, probeRayDir, probeRayVec, probeNormal;
-				Vec3f probeHitPoint[maxSurfaceHit], probeHitPointNormal[maxSurfaceHit], probeHitPointColor[maxSurfaceHit];
-				float probeRayLength;
-				
-				for (int maxLoop = 100; hitCount == 0 && maxLoop > 0; --maxLoop) {
+				Vec3f probeHitPoint, probeHitPointNormal, probeHitPointColor;
+				const int maxLoopNum = 3;
+				for (int loopnum = 0; loopnum < maxLoopNum; ++loopnum) {
 					// sample (ch, axis, radius) a probe ray
-					#if USE_SOE
-					sampleBSSRDFprobeRaySoE(rd(rdState), rd(rdState), rd(rdState), rd(rdState), rd(rdState), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, vx, vy, sampledRadius);
-					#else
-					sampleBSSRDFprobeRay(rd(rdState), rd(rdState), rd(rdState), rd(rdState), nl, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf, vx, vy, sampledRadius);
-					#endif
+					if (needNewProbeRay) {
+						sampleBSSRDFprobeRay(rd(rdState), rd(rdState), rd(rdState),
+						  normal2, hitpoint, sigmaT, rho, probeRayOrig, probeRayDir, probeRayLength, bssrdf,
+							vx, vy, sampledRadius);
 
-					// search along the probe ray
-					for (unsigned int i = 0; i < maxSurfaceHit; ++i) {
-						// scene traversal
-						intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
-						
-						// out of probe ray length
-						if (probeRayLength < hitDistance) {
-							break;
+						needNewProbeRay = false;
+						if (selectThisProbeRay) {
+							probeHitCount = hitCountPerProbe;
 						}
-
-						// hit
-						Vec3f probeHitPointAny = probeRayOrig + probeRayDir * hitDistance;
-						probeRayVec = probeHitPointAny - hitpoint;
-
-						float realRadius = probeRayVec.length();
-						int surfaceMat = tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr));
-
-						// texture fetching
-						Vec3f smoothNormal;
-						Vec3f probeObjColor;
-						textureFetching(smoothNormal, probeObjColor, hitTriAddr, probeHitPointAny);
-						smoothNormal = normalize(smoothNormal);
-
-						float normalDot = abs(dot(smoothNormal, probeRayDir));
-
-						// test condition and record
-						if (surfaceMat == bssrdfMatId 
-							&& realRadius / sampledRadius < maxRatio 
-							&& normalDot > minNormalDot) {
-
-							// record hitpoint
-							probeHitPoint[hitCount] = probeHitPointAny;
-
-							//
-							probeHitPointNormal[hitCount] = smoothNormal;
-							probeHitPointColor[hitCount] = useTexture ? probeObjColor : Vec3f(1.0f);
-
-							// index
-							++hitCount;
-						}
-
-						// prepare next probe ray
-						probeRayLength -= hitDistance;
-						probeRayOrig = probeHitPointAny + RAY_MIN * probeRayDir;
+						selectThisProbeRay = false;
+						hitCountPerProbe = 0;
 					}
-				}
+				
+					// search along the probe ray
+					intersectBVHandTriangles(make_float4(probeRayOrig.x, probeRayOrig.y, probeRayOrig.z, 
+						RAY_MIN), make_float4(probeRayDir.x,  probeRayDir.y,  probeRayDir.z,  
+							RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
+					
+					// out of probe ray length
+					if (probeRayLength < hitDistance) {
+						needNewProbeRay = true;
+						continue;
+					}
 
-				// in case
+					// hit
+					Vec3f probeHitPointAny = probeRayOrig + probeRayDir * hitDistance;
+					probeRayVec = probeHitPointAny - hitpoint;
+					float realRadius = probeRayVec.length();
+					
+					// texture fetching
+					Vec3f smoothNormal;
+					Vec3f probeObjColor;
+					textureFetching(smoothNormal, probeObjColor, hitTriAddr, probeHitPointAny);
+					int surfaceMat = tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr));
+					float normalDot = abs(dot(smoothNormal, probeRayDir));
+
+					// test condition and record
+					if (surfaceMat == bssrdfMatId 
+						&& (realRadius / sampledRadius < maxRatio && normalDot > minNormalDot)) 
+					{
+
+						++hitCount;
+						++hitCountPerProbe;
+
+						if (hitCount == 1 || rd(rdState) < 1.0f / hitCount) {
+							// record hitpoint
+							probeHitPoint = probeHitPointAny;
+							probeHitPointNormal = smoothNormal;
+							//probeHitPointNormal = probeNormal;
+							probeHitPointColor = probeObjColor;
+							selectThisProbeRay = true;
+						}
+					}
+
+					// next segment
+					probeRayLength -= hitDistance;
+					probeRayOrig = probeHitPointAny + RAY_MIN * probeRayDir;
+				}
 				if (hitCount == 0) {
 					hitpoint += nl * RAY_MIN;
 					mask *= beta * ks * objcol;
 					break;
 				}
+				if (selectThisProbeRay) {
+					probeHitCount = hitCountPerProbe;
+				}
+				mask *= probeHitCount * probeHitPointColor * objcol * 0.8f;
 				
 				// choose next point and sample next direction
-				int nextPointIdx = rd(rdState) * hitCount;
-				Vec3f& nextHitPoint = probeHitPoint[nextPointIdx];
-				Vec3f& nextNormal = probeHitPointNormal[nextPointIdx];
-				Vec3f& nextColor = probeHitPointColor[nextPointIdx];
+				Vec3f& nextHitPoint = probeHitPoint;
+				Vec3f& nextNormal = probeHitPointNormal;
 
 				nextNormal.normalize();
 				lambertianReflection(rd(rdState), rd(rdState), nextdir, nextNormal);
 
 				// calculate value
-				#if USE_SOE
-				calculateBSSRDFSoE(nl, nextNormal, sigmaT, rho, beta, probeRayVec, vx, vy, scaleFactor);
-				#else
-				calculateBSSRDF(nl, nextNormal, sigmaT, rho, beta, bssrdf, probeRayVec, vx, vy, scaleFactor);
-				#endif
+				calculateBSSRDF(normal2, nextNormal, sigmaT, rho, beta, bssrdf, probeRayVec, vx, vy, scaleFactor);
+				mask *= beta;
+				Vec3f importanceSamplingMask = mask;
 
-				mask *= beta * hitCount * kd * nextColor;
-
-				// importance sampling light
-				if (nextHitPoint.x * nextHitPoint.x + nextHitPoint.z * nextHitPoint.z < 0.02f && nextHitPoint.y > 0) {
-					Vec3f lightDir = Vec3f(0.0f, 1.0f, 0.0f);
-					Vec3f Li = Vec3f(1.0f, 1.0f, 1.0f);
-					Vec3f surfaceF = Vec3f((1.0f - FrD(dot(lightDir, nextNormal), 1.0f, etaT)) / (1.0f - 2.0f * FM1(1.0f / etaT)) * invPi);
-					float lightPdf = 1.0f;
-					float scatteringPdf = abs(dot(lightDir, nl)) * invPi;
-					accucolor += mask * surfaceF * Li * (scatteringPdf + lightPdf) / (scatteringPdf * scatteringPdf + lightPdf * lightPdf);
-				}
-
-				// next point (small position bias)
-				hitpoint = probeHitPoint[nextPointIdx] + RAY_MIN * nextNormal;
-
-				// mask
+				// final mask
 				float outS = (1.0f - FrD(dot(nextdir, nextNormal), 1.0f, etaT)) / (1.0f - 2.0f * FM1(1.0f / etaT));
 				mask *= outS;
+
+				// next point (small position bias)
+				hitpoint = nextHitPoint + RAY_MIN * nextNormal;
+
+				// importance sampling light
+				#if USE_DISTANT_LIGHT
+				float cosTh = dot(Ddis, nextNormal);
+
+				if (cosTh < 0) {
+					break;
+				}
+
+				// shadow ray probe
+				Vec3f shadowRayOrig = hitpoint;
+				Vec3f shadowRayDir = Ddis;
+
+				intersectBVHandTriangles(make_float4(shadowRayOrig.x, shadowRayOrig.y, shadowRayOrig.z, 
+					RAY_MIN), make_float4(shadowRayDir.x,  shadowRayDir.y,  shadowRayDir.z,  
+				  RAY_MAX), hitTriAddr, hitDistance, probeNormal, false);
+
+				// in shadow
+				if (hitDistance < 1e10f) {
+						break;
+				}
+
+				// distant light
+				Vec3f surfaceF = Vec3f((1.0f - FrD(abs(cosTh), 1.0f, etaT)) / (1.0f - 2.0f * FM1(1.0f / etaT)) * invPi);
+				float lightPdf = 1.0f;
+				float scatteringPdf = abs(cosTh) * invPi;
+				float weightFactor = (scatteringPdf + lightPdf) / (scatteringPdf * scatteringPdf + lightPdf * lightPdf);
+				accucolor += importanceSamplingMask * surfaceF * Ldis * weightFactor;
+				#endif
 
 				break;
 			}
@@ -1031,7 +1073,7 @@ __global__ void pathTracingKernel(
 	// convert from 96-bit to 24-bit colour + perform gamma correction
 	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
 		                             (unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
-		                             (unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
+									 (unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
 
 	// store pixel coordinates and pixelcolour in OpenGL readable outputbuffer
 	output[i] = Vec3f(x, y, fcolour.c);

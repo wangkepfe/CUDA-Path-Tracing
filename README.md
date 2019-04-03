@@ -22,13 +22,6 @@
     <td> <img src="renderingResult/bssrdf800.PNG" alt="Drawing" style="width: 200px;"/> </td>
 </tr></table>
 
-## Human skin rendering
-<table> <tr>
-    <td> <img src="renderingResult/head01.png" alt="Drawing" style="width: 200px;"/> </td>
-    <td> <img src="renderingResult/head02.png" alt="Drawing" style="width: 200px;"/> </td>
-    <td> <img src="renderingResult/head03.png" alt="Drawing" style="width: 200px;"/> </td>
-</tr></table>
-
 # Library and external dependancy
 - cuda
 - glut

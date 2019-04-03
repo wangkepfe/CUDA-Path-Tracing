@@ -58,15 +58,22 @@
 #define NO_CACHE_MODE false
 
 // scene file / textures input
-// const std::string HDRmapname = "data/pisa.hdr";
-// const std::string scenefile = "data/head.ply";
-// const std::string textureFile = "data/head_albedomap.png";
-
 const std::string HDRmapname = "data/pisa.hdr";
-const std::string scenefile = "data/testbox2.obj";
-const std::string textureFile = "data/uv.png";
-const std::string camFile = "data/testBox.cam";
-unsigned int timeout = 1200000;
+const std::string scenefile = "data/head.ply";
+const std::string textureFile = "data/head_albedomap.png";
+const std::string camFile = "data/head.cam";
+
+// const std::string HDRmapname = "data/pisa.hdr";
+// const std::string scenefile = "data/testbox2.obj";
+// const std::string textureFile = "data/uv.png";
+// const std::string camFile = "data/testBox.cam";
+
+// const std::string HDRmapname = "data/pisa.hdr";
+// const std::string scenefile = "data/dragon.obj";
+// const std::string textureFile = "data/Checker.png";
+// const std::string camFile = "data/dragon.cam";
+
+unsigned int timeout = 500;
 
 // BVH
 Vec4i *cpuNodePtr = NULL;
@@ -217,12 +224,35 @@ void disp(void)
 		printf("time: %ds, frame: %d, mspf: %d\n", lastSec, framenumber, ms/framenumber);
 	}
 
+	static bool print5 = false;
+	static bool print50 = false;
+
+	if (!print5 && lastSec >= 5) {
+		print5 = true;
+		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
+		cudaDeviceSynchronize();
+		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
+		cudaDeviceSynchronize();
+		writeToPPM("output5.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
+		delete hostOutputBuffer;
+	}
+
+	if (!print50 && lastSec >= 50) {
+		print50 = true;
+		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
+		cudaDeviceSynchronize();
+		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
+		cudaDeviceSynchronize();
+		writeToPPM("output50.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
+		delete hostOutputBuffer;
+	}
+
 	if (save_and_exit || lastSec >= timeout) {
 		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
 		cudaDeviceSynchronize();
 		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
 		cudaDeviceSynchronize();
-		writeToPPM("output.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
+		writeToPPM("output500.ppm", scrwidth, scrheight, hostOutputBuffer, framenumber);
 		delete hostOutputBuffer;
 		glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE,GLUT_ACTION_CONTINUE_EXECUTION);
 		glutLeaveMainLoop();
@@ -485,13 +515,17 @@ void createBVH()
 				int vi2 = indices[i * 3 + 2].vertex_index;
 				newtri.vertices = Vec3i(vi0, vi1, vi2);
 
-				newtri.uv[0] = Vec2f(attrib.texcoords[indices[i * 3    ].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3    ].texcoord_index * 2 + 1]);
-				newtri.uv[1] = Vec2f(attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2 + 1]);
-				newtri.uv[2] = Vec2f(attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2 + 1]);
-
-				newtri.normal[0] = Vec3f(attrib.normals[indices[i * 3    ].normal_index * 3], attrib.normals[indices[i * 3    ].normal_index * 3 + 1], attrib.normals[indices[i * 3    ].normal_index * 3 + 2]);
-				newtri.normal[1] = Vec3f(attrib.normals[indices[i * 3 + 1].normal_index * 3], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 2]);
-				newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
+				if (!attrib.texcoords.empty()) {
+					newtri.uv[0] = Vec2f(attrib.texcoords[indices[i * 3    ].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3    ].texcoord_index * 2 + 1]);
+					newtri.uv[1] = Vec2f(attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 1].texcoord_index * 2 + 1]);
+					newtri.uv[2] = Vec2f(attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2], 1.0f - attrib.texcoords[indices[i * 3 + 2].texcoord_index * 2 + 1]);
+				}
+				
+				if (!attrib.normals.empty()) {
+					newtri.normal[0] = Vec3f(attrib.normals[indices[i * 3    ].normal_index * 3], attrib.normals[indices[i * 3    ].normal_index * 3 + 1], attrib.normals[indices[i * 3    ].normal_index * 3 + 2]);
+					newtri.normal[1] = Vec3f(attrib.normals[indices[i * 3 + 1].normal_index * 3], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 1].normal_index * 3 + 2]);
+					newtri.normal[2] = Vec3f(attrib.normals[indices[i * 3 + 2].normal_index * 3], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 1], attrib.normals[indices[i * 3 + 2].normal_index * 3 + 2]);
+				}
 
 				tris.add(newtri);
 

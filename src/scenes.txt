@@ -1,0 +1,55 @@
+// ---------- scene user instruction: copy and paste to main.cpp and recompile the code :)
+
+// ----- test scene -----
+const std::string HDRmapname = "data/pisa.hdr";
+const std::string scenefile = "data/TestObj.obj";
+const std::string textureFile = "data/Checker.png";
+
+// ----- head scene -----
+const std::string HDRmapname = "data/pisa.hdr";
+const std::string scenefile = "data/head.ply";
+const std::string textureFile = "data/head_albedomap.png";
+
+
+
+// ---------- material user instruction: copy and paste to the render kernel and recompile the code :D
+
+// ----- test scene -----
+if      (materialId == 0) { refltype = MAT_DIFF; useTexture = true; }              // ground
+else if (materialId == 1) { refltype = MAT_REFL; }                                 // inner sphere
+else if (materialId == 2) { refltype = MAT_REFL; }                                 // label on the ground
+else if (materialId == 3) { refltype = MAT_EMIT; emit = Vec3f(2.0f, 2.0f, 2.0f); } // light plane
+else if (materialId == 4) { refltype = MAT_COOL_MAT_YOU_WANT_TO_TEST; }            // outer sphere
+else                      { refltype = MAT_DIFF; }
+
+// ----- media face -----
+refltype = MAT_GLASS;
+objMedium = MEDIUM_SKIN;
+alphax = 0.5f;
+useTexture = true;
+
+// ----- bssrdf face -----
+refltype = MAT_SKIN; 
+alphax = 0.5f; 
+F0 = Vec3f(0.04f);
+scaleFactor = 1000.0f;
+useTexture = true;
+bssrdfMatId = materialId;
+
+
+
+
+// ---------- materials ----------
+
+// ----- Fresnel Schlick -----
+Vec3f F0 = Vec3f(0.04f, 0.04f, 0.04f); // plastic
+Vec3f F0 = Vec3f(1.00f, 0.71f, 0.29f); // gold
+Vec3f F0 = Vec3f(0.95f, 0.93f, 0.88f); // silver
+Vec3f F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
+
+// ----- Medium -----
+if      (medium == MEDIUM_CLOUD) { med = Medium(Vec3f{20.0f, 20.0f, 20.0f}, Vec3f{5.0f, 5.0f, 5.0f}, 0.0f); }
+else if (medium == MEDIUM_TEA)   { med = Medium(Vec3f{0.040224f, 0.045264f, 0.051081f} * 5.0f, Vec3f{2.4288f, 4.5757f, 7.2127f}, 0.5f); }
+else if (medium == MEDIUM_MILK)  { med = Medium(Vec3f{4.5513f, 5.8294f, 7.136f} * 20.0f, Vec3f{0.0015333f, 0.0046f, 0.019933f}, -0.5f); }
+else if (medium == MEDIUM_JADE)  { med = Medium(Vec3f{45.0f, 40.0f, 50.0f}, Vec3f{10.0f, 5.0f, 15.0f}, 0.2f); }
+else if (medium == MEDIUM_SKIN)  { med = Medium(Vec3f{0.74, 0.88, 1.01} * 1000.0f, Vec3f{0.032, 0.17, 0.48} * 500.0f, 0.5f); }

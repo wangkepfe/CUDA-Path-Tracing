@@ -84,6 +84,7 @@ struct Vec3f
 	inline __host__ __device__ Vec3f operator-(const Vec3f& v) const{ return Vec3f(x - v.x, y - v.y, z - v.z); }
 	inline __host__ __device__ Vec3f operator/(const Vec3f& v) const{ return Vec3f(x / v.x, y / v.y, z / v.z); }
 	inline __host__ __device__ Vec3f& operator/=(const float& a){ x /= a; y /= a; z /= a; return *this; }
+	inline __host__ __device__ Vec3f& operator/=(const Vec3f& v){ x /= v.x; y /= v.y; z /= v.z; return *this; }
 	inline __host__ __device__ bool operator!=(const Vec3f& v){ return x != v.x || y != v.y || z != v.z; }
 	inline __host__ __device__ bool operator==(const Vec3f& v){ return x == v.x && y == v.y && z == v.z; }
 	inline __host__ __device__ float& operator[](int i) { return _v[i]; }
@@ -147,7 +148,7 @@ inline __host__ __device__ float dot(const Vec4f& v1, const Vec4f& v2){ return v
 inline __host__ __device__ float distancesq(const Vec3f& v1, const Vec3f& v2){ return (v1.x - v2.x)*(v1.x - v2.x) + (v1.y - v2.y)*(v1.y - v2.y) + (v1.z - v2.z)*(v1.z - v2.z); }
 inline __host__ __device__ float distance(const Vec3f& v1, const Vec3f& v2){ return sqrtf((v1.x - v2.x)*(v1.x - v2.x) + (v1.y - v2.y)*(v1.y - v2.y) + (v1.z - v2.z)*(v1.z - v2.z)); }
 inline __host__ __device__ Vec3f powf(const Vec3f& v1, const Vec3f& v2){ return Vec3f(powf(v1.x, v2.x), powf(v1.y, v2.y), powf(v1.z, v2.z)); }
-inline __host__ __device__ Vec3f expf(const Vec3f& v){ return Vec3f(expf(v.x), expf(v.y), expf(v.z)); }
+inline __host__ __device__ Vec3f exp3f(const Vec3f& v){ return Vec3f(expf(v.x), expf(v.y), expf(v.z)); }
 inline __host__ __device__ float clampf(float a, float lo, float hi){ return a < lo ? lo : a > hi ? hi : a; }
 inline __host__ __device__ Vec3f mixf(const Vec3f& v1, const Vec3f& v2, float a){ return v1 * (1.0 - a) + v2 * a; }
 inline __host__ __device__ float smoothstep(float edge0, float edge1, float x){ float t; t = clampf((x - edge0) / (edge1 - edge0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }

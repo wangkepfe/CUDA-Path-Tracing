@@ -14,7 +14,7 @@ void initCamera()
 	interactiveCamera = new InteractiveCamera();
 
 	interactiveCamera->setResolution(scrwidth, scrheight);
-	interactiveCamera->setFOVX(45);
+	interactiveCamera->setFOVX(30);
 }
 
 // mouse event handlers
@@ -31,14 +31,14 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
 		case(' ') : initCamera(); buffer_reset = true; break;
 
-		case('a') : interactiveCamera->strafe(-0.05f); buffer_reset = true; break;
-		case('d') : interactiveCamera->strafe(0.05f); buffer_reset = true; break;
+		case('a') : interactiveCamera->strafe(-0.01f); buffer_reset = true; break;
+		case('d') : interactiveCamera->strafe(0.01f); buffer_reset = true; break;
 
-		case('r') : interactiveCamera->changeAltitude(0.05f); buffer_reset = true; break;
-		case('f') : interactiveCamera->changeAltitude(-0.05f); buffer_reset = true; break;
+		case('r') : interactiveCamera->changeAltitude(0.01f); buffer_reset = true; break;
+		case('f') : interactiveCamera->changeAltitude(-0.01f); buffer_reset = true; break;
 
-		case('w') : interactiveCamera->goForward(0.05f); buffer_reset = true; break;
-		case('s') : interactiveCamera->goForward(-0.05f); buffer_reset = true; break;
+		case('w') : interactiveCamera->goForward(0.01f); buffer_reset = true; break;
+		case('s') : interactiveCamera->goForward(-0.01f); buffer_reset = true; break;
 
 		case('g') : interactiveCamera->changeApertureDiameter(0.1); buffer_reset = true; break;
 		case('h') : interactiveCamera->changeApertureDiameter(-0.1); buffer_reset = true; break;

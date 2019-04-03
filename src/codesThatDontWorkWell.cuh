@@ -577,3 +577,20 @@ __device__ inline void plasticReflection (
 		// 		geomtype = GEO_SPHERE; 
 		// 	}
 		// }
+
+    // int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
+            // threadId == 460800
+    // if (threadId > 300000 && threadId < 700000 && beta.x < 0.01f) {
+    //     printf("BSSRDF: threadId = %d\n", threadId);
+    //     printf("BSSRDF: entering kernel ......\n");
+    //     printf("BSSRDF: previous normal = (%.5f, %.5f, %.5f), next normal = (%.5f, %.5f, %.5f)\n", ns.x, ns.y, ns.z, normalNext.x, normalNext.y, normalNext.z);
+    //     printf("BSSRDF: d = (%.5f, %.5f, %.5f), d_direction = (%.5f, %.5f, %.5f)\n", d.x, d.y, d.z, d_direction.x, d_direction.y, d_direction.z);
+    //     // printf("BSSRDF: sampleAxis = %d, sampledRadius = %.5f\n", sampleAxis, sampledRadius);
+    //     printf("BSSRDF: sigmaT = (%.5f, %.5f, %.5f), rho = (%.5f, %.5f, %.5f)\n", sigmaT.x, sigmaT.y, sigmaT.z, rho.x, rho.y, rho.z);
+    //     printf("BSSRDF: radius projection = (%.5f, %.5f, %.5f), radius = %.5f\n", radiusProjection[0], radiusProjection[1], radiusProjection[2], radius);
+    //     printf("BSSRDF: axis channel pdf = (%.5f, %.5f, %.5f)\n", axisChannelPdf[0], axisChannelPdf[1], axisChannelPdf[2]);
+    //     printf("BSSRDF: pdf = %.5f, Sr = (%.5f, %.5f, %.5f), outS = %.5f, beta = (%.5f, %.5f, %.5f)\n", 
+    //     pdf, Sr.x, Sr.y, Sr.z, outS, beta.x, beta.y, beta.z);
+    //     printf("\n\n");
+    // }
