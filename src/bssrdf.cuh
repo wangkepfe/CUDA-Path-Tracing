@@ -296,14 +296,6 @@ __device__ inline void sampleBSSRDFprobeRay (
         probeRayDir = vy;  probex = vx; probey = normal; r1 *= (r1 - 0.75f) * 4;
     }
 
-    // sample probe ray dir
-    // if (r1 < 0.5f) {
-    //    probeRayDir = -probeRayDir;
-    //     r1 *= 2.0f;
-    // } else {
-    //     r1 *= (r1 - 0.5f) * 2;
-    // }
-
     // sample radius
     #if USE_SOE
     float s = paramSoE(rho[ch]);
@@ -328,7 +320,7 @@ __device__ inline void calculateBSSRDF(
         const Vec3f& ns, const Vec3f& normalNext,
         const Vec3f& sigmaT, const Vec3f& rho,
         Vec3f& beta, const BSSRDF& table, const Vec3f& d,
-        const Vec3f& ss, const Vec3f& ts, const float scaleFactor)
+        const Vec3f& ss, const Vec3f& ts)
 {
     // real radius
     float radius = d.length();

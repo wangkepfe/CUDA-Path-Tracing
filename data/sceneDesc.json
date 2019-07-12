@@ -1,0 +1,34 @@
+{
+    "scenefile"   : "data/TestObj.obj",
+    "HDRmapname"  : "data/pisa.hdr",
+    "textureFile" : "data/Checker.png",
+    "camFile"     : "data/myCamera.cam",
+    "matCount"    : 5,
+    "matDesc" :
+    {
+        "InnerMat" :
+        {
+            "refltype"    : "MAT_SUBSURFACE",
+            "alphax"      : 0.3,
+            "objcol"      : [0.9987,0.9986,0.9772],
+            "mfp"         : [0.0087,0.0084,0.0099]
+        },
+        "OuterMat" :
+        {
+            "refltype"    : "MAT_GLASS"
+        },
+        "LTELogo" :
+        {
+            "refltype"    : "MAT_REFL"
+        },
+        "BackGroundMat" :
+        {
+            "refltype"    : "MAT_DIFF",
+            "useTexture"  : true
+        },
+        "Material" :
+        {
+            "refltype"    : "MAT_NULL"
+        }
+    }
+}

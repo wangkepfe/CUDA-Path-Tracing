@@ -4,6 +4,7 @@
 
 #include "linear_math.h"
 #include "mathDefine.h"
+#include <iostream>
 
 // Camera struct, used to store interactive camera data, copied to the GPU and used by CUDA for each frame
 struct Camera {

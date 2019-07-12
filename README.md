@@ -35,6 +35,17 @@
 - Volumn scattering
 - Camera effects
 
+# Future features maybe
+- Real time progressive ray tracing
+- Complex scene with diverse materials
+- Dynamic objects
+
+# Run it on your PC
+- Install cuda (glut & glew included in the repo)
+- Click "raytracer.exe"
+- Modify the scene by "data/sceneDesc.json"
+- I build with mingw32-make, check "make_test.bat"
+
 # References
 - framework based on Matching Socks CUDA path tracer by Samuel Lapere, 2016 https://raytracey.blogspot.com
 - bvh based on the GPU ray tracing framework of Timo Aila, Samuli Laine and Tero Karras (Nvidia Research), based on Source code for original framework: 

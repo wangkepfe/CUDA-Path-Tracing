@@ -2,9 +2,6 @@
  * 
  *          CUDA GPU path tracing
  * 
- * 
- * 
- * 
  * ****************************************/
 
 // gl
@@ -58,22 +55,8 @@
 #define NO_CACHE_MODE false
 
 // scene file / textures input
-const std::string HDRmapname = "data/pisa.hdr";
-const std::string scenefile = "data/head.ply";
-const std::string textureFile = "data/head_albedomap.png";
-const std::string camFile = "data/head.cam";
-
-// const std::string HDRmapname = "data/pisa.hdr";
-// const std::string scenefile = "data/testbox2.obj";
-// const std::string textureFile = "data/uv.png";
-// const std::string camFile = "data/testBox.cam";
-
-// const std::string HDRmapname = "data/pisa.hdr";
-// const std::string scenefile = "data/dragon.obj";
-// const std::string textureFile = "data/Checker.png";
-// const std::string camFile = "data/dragon.cam";
-
-unsigned int timeout = 500;
+SceneDesc sceneDesc;
+MatDesc* gpuMatDesc = NULL;
 
 // BVH
 Vec4i *cpuNodePtr = NULL;
@@ -203,7 +186,7 @@ void disp(void)
 	cudaRender(cudaNodePtr, cudaTriWoopPtr, cudaTriDebugPtr, cudaTriIndicesPtr, finaloutputbuffer,
 			   accumulatebuffer, gpuHDRenv, gpuTextureArray, framenumber, hashedframes, 
 			   nodeSize, leafnode_count, triangle_count, cudaRendercam, 
-			   cudaUvPtr, cudaNormalPtr, cudaMaterialPtr, bssrdf);
+			   cudaUvPtr, cudaNormalPtr, cudaMaterialPtr, bssrdf, gpuMatDesc);
 
 	cudaThreadSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -220,8 +203,9 @@ void disp(void)
 
 	unsigned int ms = myClock.readMS();
 	if (ms/1000 != lastSec) {
-		lastSec = ms/1000;
-		printf("time: %ds, frame: %d, mspf: %d\n", lastSec, framenumber, ms/framenumber);
+		lastSec = ms / 1000;
+		float mspf = ms / framenumber;
+		printf("time: %ds, frame: %d, mspf: %d, FPS: %d\n", lastSec, framenumber, (int)mspf, (int)(1000.0f / mspf));
 	}
 
 	static bool print5 = false;
@@ -247,7 +231,7 @@ void disp(void)
 		delete hostOutputBuffer;
 	}
 
-	if (save_and_exit || lastSec >= timeout) {
+	if (save_and_exit) {
 		Vec3f* hostOutputBuffer = new Vec3f[scrwidth * scrheight];
 		cudaDeviceSynchronize();
 		cudaMemcpy(hostOutputBuffer, accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f), cudaMemcpyDeviceToHost);
@@ -365,9 +349,9 @@ void writeBVHcachefile(FILE *BVHcachefile, const std::string BVHcacheFilename)
 void initTexture() 
 {
 	int texWidth, texHeight, texChannel, desiredChannel = STBI_rgb_alpha;
-	unsigned char* buffer = stbi_load(textureFile.c_str(), &texWidth, &texHeight, &texChannel, desiredChannel);
+	unsigned char* buffer = stbi_load(sceneDesc.textureFile.c_str(), &texWidth, &texHeight, &texChannel, desiredChannel);
 
-	std::cout << "texture file loaded: " << textureFile << ", size = (" << texWidth << ", " << texHeight << "), channel = " << texChannel << "\n";
+	std::cout << "texture file loaded: " << sceneDesc.textureFile << ", size = (" << texWidth << ", " << texHeight << "), channel = " << texChannel << "\n";
 
 	// cpu texture buffer
 	cpuTextureBuffer = new float4[texWidth * texHeight];
@@ -388,7 +372,7 @@ void initTexture()
 void initHDR()
 {
 	HDRImage HDRresult;
-	const char *HDRfile = HDRmapname.c_str();
+	const char *HDRfile = sceneDesc.HDRmapname.c_str();
 
 	if (HDRLoader::load(HDRfile, HDRresult))
 		printf("HDR environment map loaded. Width: %d Height: %d\n", HDRresult.width, HDRresult.height);
@@ -450,6 +434,10 @@ void initCUDAscenedata()
 	// allocate GPU memory for accumulation buffer
 	cudaMalloc(&accumulatebuffer, scrwidth * scrheight * sizeof(Vec3f));
 
+	// scene desc
+	cudaMalloc((void **)&gpuMatDesc, sizeof(MatDesc) * sceneDesc.matCount);
+	cudaMemcpy(gpuMatDesc, sceneDesc.matDesc, sizeof(MatDesc) * sceneDesc.matCount, cudaMemcpyHostToDevice);
+
 	// allocate GPU memory for interactive camera
 	cudaMalloc((void **)&cudaRendercam, sizeof(Camera));
 
@@ -490,14 +478,14 @@ void createBVH()
 	Array<Vec3f>           verts;           verts.clear();
 	std::vector<S32> matIds;
 
-	auto ext = scenefile.substr(scenefile.find_last_of(".") + 1);
+	auto ext = sceneDesc.scenefile.substr(sceneDesc.scenefile.find_last_of(".") + 1);
 	if (ext == "obj") {
 		tinyobj::attrib_t attrib;
 		std::vector<tinyobj::shape_t> shapes;
 		std::vector<tinyobj::material_t> materials;
 		std::string warn, err;
 
-		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scenefile.c_str(), "data"))
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, sceneDesc.scenefile.c_str(), "data"))
 		{
 			std::cout << "failed to load model!\n";
 		}
@@ -529,7 +517,7 @@ void createBVH()
 
 				tris.add(newtri);
 
-				matIds.push_back(matId[i]);
+				matIds.push_back(sceneDesc.matIdMap[materials[matId[i]].name]);
 			}
 			totalTriangleCount += indices.size() / 3;
 		}
@@ -541,7 +529,7 @@ void createBVH()
 		}
 	} else if (ext == "ply") {
 		using namespace tinyply;
-		std::ifstream ss(scenefile, std::ios::binary);
+		std::ifstream ss(sceneDesc.scenefile, std::ios::binary);
 		PlyFile file;
 		file.parse_header(ss);
 		std::cout << "........................................................................\n";
@@ -676,19 +664,23 @@ void deleteCudaAndCpuMemory()
 	delete hostRendercam;
 	delete interactiveCamera;
 	delete gpuBVH;
+	delete sceneDesc.matDesc;
 
 	std::cout << "Memory freed\n";
 }
 
 int main(int argc, char **argv)
 {
+	// read scene desc
+	sceneDesc = loadSceneDesc("data/sceneDesc.json");
+
 	// camera
 	hostRendercam = new Camera();
 	initCamera();
 	interactiveCamera->buildRenderCamera(hostRendercam);
-	interactiveCamera->loadFromFile(camFile);
+	interactiveCamera->loadFromFile(sceneDesc.camFile);
 
-	std::string BVHcacheFilename(scenefile.c_str());
+	std::string BVHcacheFilename(sceneDesc.scenefile.c_str());
 	BVHcacheFilename += ".bvh";
 
 	FILE *BVHcachefile = fopen(BVHcacheFilename.c_str(), "rb");

@@ -10,7 +10,6 @@
 
 // cuda
 #include <cuda.h>
-#include <math_functions.h>
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <device_launch_parameters.h>
@@ -49,28 +48,15 @@
 
 // sampling settings
 #define NUM_SAMPLE 1
-#define USE_RUSSIAN false
-#define RUSSIAN_P 0.98
-#define LIGHT_BOUNCE 3
+#define LIGHT_BOUNCE_NUM_MIN 2
+#define LIGHT_BOUNCE_NUM_MAX 8
 #define USE_ENVMAP true
 #define USE_DISTANT_LIGHT false
 
 // ******************* structures ********************
 
 // enum
-enum Refl_t { 
-	MAT_EMIT, 
-	MAT_DIFF, 
-	MAT_GLASS, 
-	MAT_REFL, 
-	MAT_DIFF_REFL,
-	MAT_FRESNEL,
-	MAT_NULL, 
-	MAT_MEDIUM,
-	MAT_SUBSURFACE,
-};  // material types
 enum Geo_t { GEO_TRIANGLE, GEO_SPHERE, GEO_GROUND };  // geo types
-enum Medium_t { MEDIUM_NO = -1, MEDIUM_CLOUD = 0, MEDIUM_TEA, MEDIUM_MILK, MEDIUM_JADE, MEDIUM_SKIN };
 
 // geometry, material
 struct Ray {
@@ -107,17 +93,6 @@ struct GroundPlane {
 	__device__ Vec3f getNormal() const {
 		return Vec3f(0.0f, 1.0f, 0.0f);
 	}
-};
-
-struct Medium {
-	__device__ Medium() {}
-	__device__ Medium(const Vec3f& sigmaS, const Vec3f& sigmaA, float g) : sigmaS{sigmaS}, sigmaA{sigmaA}, g{g} {}
-	Vec3f sigmaS;
-	Vec3f sigmaA;
-	float g;
-	__device__ Vec3f getSigmaT() { return sigmaA + sigmaS; }
-	__device__ Vec3f getRho() { return sigmaS / getSigmaT(); }
-	__device__ Medium& operator*(float scaleFactor) { sigmaS *= scaleFactor; sigmaA *= scaleFactor; return *this; };
 };
 
 // ******************* global variables ********************
@@ -462,7 +437,7 @@ __device__ inline Vec3f envLight(const Camera* cameraSetting, Vec3f& raydir) {
 }
 
 // fetch textures: uv, normal, color
-__device__ inline void textureFetching(Vec3f& smoothNormal, Vec3f& objcol, int hitTriAddr, const Vec3f& hitpoint) {
+__device__ inline void textureFetching(Vec3f& smoothNormal, Vec3f& objcol, int hitTriAddr, const Vec3f& hitpoint, bool useTexture) {
 	float4 po0 = tex1Dfetch(triDebugTexture, hitTriAddr);      Vec3f p0 = Vec3f(po0.x, po0.y, po0.z);
 	float4 po1 = tex1Dfetch(triDebugTexture, hitTriAddr + 1);  Vec3f p1 = Vec3f(po1.x, po1.y, po1.z);
 	float4 po2 = tex1Dfetch(triDebugTexture, hitTriAddr + 2);  Vec3f p2 = Vec3f(po2.x, po2.y, po2.z);
@@ -483,9 +458,11 @@ __device__ inline void textureFetching(Vec3f& smoothNormal, Vec3f& objcol, int h
 	Vec2f hitUv = uv0 * u + uv1 * v + uv2 * w;
 	smoothNormal = n0 * u + n1 * v + n2 * w;
 	
-	// read color from texture
-	float4 colorTex = tex2D(colorTexture, hitUv.x, hitUv.y);
-	objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
+	if (useTexture) {
+		// read color from texture
+		float4 colorTex = tex2D(colorTexture, hitUv.x, hitUv.y);
+		objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
+	}
 }
 
 // renderKernel:
@@ -497,7 +474,8 @@ __device__ Vec3f renderKernel(
 	Vec3f& rayorig, 
 	Vec3f& raydir, 
 	const Camera* cameraSetting,
-	BSSRDF& bssrdf) 
+	BSSRDF& bssrdf, 
+	MatDesc* gpuMatDesc) 
 {
 	// variables define
 
@@ -527,58 +505,34 @@ __device__ Vec3f renderKernel(
 	bool useNormal;
 	Vec3f F0;
 	Vec3f tangent;
-	float scaleFactor;
+	Vec3f mfp;
+
+	// global
+	int bssrdfMatId = -1;
+	int lightBounceNum = LIGHT_BOUNCE_NUM_MIN;
 
 	// global color mask, result color
 	Vec3f mask = Vec3f(1.0f, 1.0f, 1.0f);
 	Vec3f accucolor = Vec3f(0.0f, 0.0f, 0.0f);
 	Vec3f beta;
 	
-	// medium
-	const int airMedium = MEDIUM_NO;
-	int medium = MEDIUM_NO;
-	int objMedium = MEDIUM_NO;
-	int bssrdfMatId = -1;
-
 	// distant light
 	#if USE_DISTANT_LIGHT
 	Vec3f Ldis = Vec3f(1.2f, 1.2f, 1.2f);
 	Vec3f Ddis = normalize(Vec3f(0.0f, 1.3f, -3.6f));
 	#endif
 
-	for (int bounces = 0; 
-		#if USE_RUSSIAN == true
-		rd(rdState) < RUSSIAN_P && bounces < LIGHT_BOUNCE;
-		#else
-		bounces < LIGHT_BOUNCE; 	
-		#endif
-		bounces++) {
-
-		// initialize variables
-		{
-			// bvh traversal result
-			geometryType = 0;
-			hitTriAddr = -1;
-			hitDistance = 1e20;
-			sceneT = 1e20;
-
-			// material
-			refltype = MAT_DIFF;
-			objcol = Vec3f(1.0f, 1.0f, 1.0f);
-			emit = Vec3f(0.0f, 0.0f, 0.0f);
-			alphax = 0.0f;
-			alphay = 0.0f;
-			kd = 1.0f;
-			ks = 1.0f;
-			etaT = 1.33f;
-			useTexture = false;
-			useNormal = true;
-			F0 = Vec3f(0.56f, 0.57f, 0.58f); // iron
-			tangent = Vec3f(0.0f, 1.0f, -1.0f);
-			scaleFactor = 1.0f;
-		}
-		
+	for (int bounces = 0; bounces < lightBounceNum && bounces < LIGHT_BOUNCE_NUM_MAX; bounces++) {
 		// ------------------------ scene interaction ----------------------------
+
+		// bvh traversal
+		geometryType = 0;
+		hitTriAddr = -1;
+		hitDistance = 1e20;
+		sceneT = 1e20;
+
+		// global
+		bssrdfMatId = -1;
 
 		// triangles
 		intersectBVHandTriangles(
@@ -623,25 +577,6 @@ __device__ Vec3f renderKernel(
 			return accucolor; 
 		}
 
-		// participating media
-		if (medium != MEDIUM_NO) {
-			Medium med = Medium(Vec3f{0.74, 0.88, 1.01} * 1000.0f, Vec3f{0.032, 0.17, 0.48} * 500.0f, 0.5f);
-
-			bool sampledMedium;
-
-			HomogeneousMedium(rd(rdState), rd(rdState), rd(rdState), rd(rdState),
-				mask, med.getSigmaT(), med.sigmaS, med.g, sceneT, rayorig, raydir, hitpoint, nextdir, sampledMedium
-			);
-		
-			accucolor += 0.05f * mask * envLight(cameraSetting, nextdir); // importance sampling (warning! biased!)
-
-			if (sampledMedium) {
-				rayorig = hitpoint;
-				raydir = nextdir;
-				continue;
-			}
-		}
-
 		// ---------------------- triangle interaction ----------------------
 
 		// calculate hitpoint
@@ -654,16 +589,25 @@ __device__ Vec3f renderKernel(
 			int originalIdx = tex1Dfetch(triIndicesTexture, hitTriAddr);
 			int materialId = tex1Dfetch(triMaterialTexture, originalIdx);
 
+			refltype = static_cast<Refl_t>(gpuMatDesc[materialId].refltype);
+			objcol = gpuMatDesc[materialId].objcol;
+			emit = gpuMatDesc[materialId].emit;
+			alphax = gpuMatDesc[materialId].alphax;
+			alphay = gpuMatDesc[materialId].alphay;
+			kd = gpuMatDesc[materialId].kd;
+			ks = gpuMatDesc[materialId].ks;
+			etaT = gpuMatDesc[materialId].etaT;
+			useNormal = gpuMatDesc[materialId].useNormal;
+			useTexture = gpuMatDesc[materialId].useTexture;
+			F0 = gpuMatDesc[materialId].F0;
+			tangent = gpuMatDesc[materialId].tangent;
+			mfp = gpuMatDesc[materialId].mfp;
+
+			if (refltype == MAT_SUBSURFACE) { bssrdfMatId = materialId; }
+
 			Vec3f smoothNormal;
 			Vec3f colorTex;
-			textureFetching(smoothNormal, colorTex, hitTriAddr, hitpoint);
-
-			// ---------- material description ----------
-			refltype = MAT_SUBSURFACE; 
-			alphax = 0.3f;
-			bssrdfMatId = materialId;
-			useTexture = true;
-			useNormal = true;
+			textureFetching(smoothNormal, colorTex, hitTriAddr, hitpoint, useTexture);
 
 			if (useTexture) { objcol = colorTex; } 
 			if (useNormal)  { n = smoothNormal; } 
@@ -726,6 +670,7 @@ __device__ Vec3f renderKernel(
 				break;
 			}
 			case MAT_REFL: {
+				lightBounceNum++;
 				if (alphax == 0.0f) { 
 					// perfect mirror reflection
 					nextdir = raydir - n * dot(n, raydir) * 2.0f;
@@ -744,6 +689,7 @@ __device__ Vec3f renderKernel(
 				// blend diffuse and reflection
 				if (rd(rdState) < ks / (ks + kd)) {
 					// reflection
+					lightBounceNum++;
 					macrofacetReflection(rd(rdState), rd(rdState), raydir, nextdir, nl, tangent, beta, F0, alphax, alphay);
 					mask *= beta;
 				} else {
@@ -754,17 +700,19 @@ __device__ Vec3f renderKernel(
 				break;
 			}
 			case MAT_FRESNEL: {
+				lightBounceNum++;
 				fresnelBlend(rd(rdState), rd(rdState), rd(rdState), raydir, nextdir, nl, beta, kd * objcol, F0, alphax);
 				mask *= beta;
 				break;
 			}
 			case MAT_GLASS: {
+				lightBounceNum++;
 				if (alphax == 0.0f) { 
 					// perfect specular glass
 					bool refl;
 					specularGlass(rd(rdState), into, raydir, nextdir, nl, refl, etaT);
 					hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
-					if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
+					
 				} else {
 					// microfacet glass
 					bool refl;
@@ -772,43 +720,30 @@ __device__ Vec3f renderKernel(
 					hitpoint += nl * RAY_MIN * (refl ? 1 : -1);
 					mask *= beta * objcol;
 					if (!refl && !into) mask *= etaT * etaT;
-					if (airMedium != objMedium) medium = (medium == airMedium) ? (refl ? airMedium : objMedium) : (refl ? objMedium : airMedium);
+					
 				}
 				break;
 			}
 			case MAT_EMIT: {
 				 return accucolor;  
 			}
-			case MAT_MEDIUM: {
-				nextdir = raydir;
-				hitpoint -= nl * RAY_MIN;
-				if (airMedium != objMedium) medium = (medium == airMedium) ? (!into ? airMedium : objMedium) : (!into ? objMedium : airMedium);
-				break;
-			}
 			case MAT_SUBSURFACE: {
 				bool refl;
 				Vec3f sampledNormal;
 				microfacetSampling(rd(rdState), rd(rdState), into, raydir, nl, refl, etaT, alphax, sampledNormal, beta, nextdir);
 				if (refl) {
+					lightBounceNum++;
 					hitpoint += nl * RAY_MIN;
 					mask *= beta * ks * objcol;
 					break;
 				}
 
-				//Vec3f normal2 = nl;
 				Vec3f normal2 = sampledNormal;
 
 				// material define
-				// Vec3f rho = Vec3f(0.98, 0.85, 0.6);
-				//Vec3f rho = SubsurfaceFromDiffuse(bssrdf, objcol);
 				Vec3f rho = objcol;
-				//rho *= Vec3f(1.001f, 0.9999f, 0.9995f);
-				//rho = min3f(rho, Vec3f(1.0f));
-				//Vec3f rho = Vec3f(0.99, 0.35, 0.1);
-				Vec3f mfp = Vec3f(1.3, 0.4, 0.2) * 0.001f;
-				//Vec3f mfp = Vec3f(1.3, 0.95238, 0.67114) * 0.001f;
 				Vec3f sigmaT = 1.0 / mfp;
-
+				
 				// localize
 				Vec3f vx, vy;
 				localizeSample(normal2, vx, vy);
@@ -855,24 +790,21 @@ __device__ Vec3f renderKernel(
 					
 					// texture fetching
 					Vec3f smoothNormal;
-					Vec3f probeObjColor;
-					textureFetching(smoothNormal, probeObjColor, hitTriAddr, probeHitPointAny);
+					Vec3f probeObjColor = objcol;
+					textureFetching(smoothNormal, probeObjColor, hitTriAddr, probeHitPointAny, useTexture);
 					int surfaceMat = tex1Dfetch(triMaterialTexture, tex1Dfetch(triIndicesTexture,  hitTriAddr));
 					float normalDot = abs(dot(smoothNormal, probeRayDir));
 
 					// test condition and record
-					if (surfaceMat == bssrdfMatId 
-						&& (realRadius / sampledRadius < maxRatio && normalDot > minNormalDot)) 
+					if (surfaceMat == bssrdfMatId && (realRadius / sampledRadius < maxRatio && normalDot > minNormalDot)) 
 					{
-
 						++hitCount;
 						++hitCountPerProbe;
 
 						if (hitCount == 1 || rd(rdState) < 1.0f / hitCount) {
 							// record hitpoint
 							probeHitPoint = probeHitPointAny;
-							probeHitPointNormal = smoothNormal;
-							//probeHitPointNormal = probeNormal;
+							probeHitPointNormal = useNormal ? smoothNormal : probeNormal;
 							probeHitPointColor = probeObjColor;
 							selectThisProbeRay = true;
 						}
@@ -900,7 +832,7 @@ __device__ Vec3f renderKernel(
 				lambertianReflection(rd(rdState), rd(rdState), nextdir, nextNormal);
 
 				// calculate value
-				calculateBSSRDF(normal2, nextNormal, sigmaT, rho, beta, bssrdf, probeRayVec, vx, vy, scaleFactor);
+				calculateBSSRDF(normal2, nextNormal, sigmaT, rho, beta, bssrdf, probeRayVec, vx, vy);
 				mask *= beta;
 				Vec3f importanceSamplingMask = mask;
 
@@ -965,7 +897,8 @@ __global__ void pathTracingKernel(
 	unsigned int framenumber, 
 	unsigned int hashedframenumber, 
 	const Camera* cudaRendercam,
-	BSSRDF bssrdf)
+	BSSRDF bssrdf,
+	MatDesc* gpuMatDesc)
 {
 	// assign a CUDA thread to every pixel by using the threadIndex
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
@@ -1051,7 +984,7 @@ __global__ void pathTracingKernel(
 		// ray origin
 		Vec3f originInWorldSpace = aperturePoint;
 
-		finalcol += renderKernel(&randState, originInWorldSpace, rayInWorldSpace, cudaRendercam, bssrdf) * (1.0f / NUM_SAMPLE);
+		finalcol += renderKernel(&randState, originInWorldSpace, rayInWorldSpace, cudaRendercam, bssrdf, gpuMatDesc) * (1.0f / NUM_SAMPLE);
 	}
 
 	// add pixel colour to accumulation buffer (accumulates all samples) 
@@ -1086,7 +1019,7 @@ __global__ void pathTracingKernel(
 void cudaRender(const float4* nodes, const float4* triWoops, const float4* debugTris, const int* triInds, 
 	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
 	const unsigned int nodeSize, const unsigned int leafnodecnt, const unsigned int tricnt, const Camera* cudaRenderCam, const float2 *cudaUvPtr,
-	const float4 *cudaNormalPtr, const int *cudaMaterialPtr, BSSRDF bssrdf)
+	const float4 *cudaNormalPtr, const int *cudaMaterialPtr, BSSRDF bssrdf, MatDesc* gpuMatDesc)
 {
 	static bool firstTime = true;
 
@@ -1142,5 +1075,5 @@ void cudaRender(const float4* nodes, const float4* triWoops, const float4* debug
 	dim3 threadsPerBlock (16, 16, 1);   // dim3 CUDA specific syntax, block and grid are required to schedule CUDA threads over streaming multiprocessors
 	dim3 fullBlocksPerGrid (scrwidth / threadsPerBlock.x, scrheight / threadsPerBlock.y, 1);
 
-	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>> (outputbuf, accumbuf, framenumber, hashedframenumber, cudaRenderCam, bssrdf);
+	pathTracingKernel <<< fullBlocksPerGrid, threadsPerBlock >>> (outputbuf, accumbuf, framenumber, hashedframenumber, cudaRenderCam, bssrdf, gpuMatDesc);
 }
