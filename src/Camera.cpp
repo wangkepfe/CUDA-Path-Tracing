@@ -16,7 +16,7 @@ InteractiveCamera::InteractiveCamera()
 	focalDistance = 1.0f;
 
 	resolution = Vec2f(scrwidth, scrheight);
-	fov = Vec2f(30, 30);
+	fov = Vec2f(60, 60 / scrwidth * scrheight);
 
 	envMapRotation = 0;
 }

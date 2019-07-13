@@ -42,14 +42,14 @@
 #define EntrypointSentinel 0x76543210
 
 // limits
-#define RAY_MIN 1e-7f
+#define RAY_MIN 1e-4f
 #define RAY_MAX 1e20f
-#define M_EPSILON 1e-7f
+#define M_EPSILON 1e-4f
 
 // sampling settings
 #define NUM_SAMPLE 1
 #define LIGHT_BOUNCE_NUM_MIN 2
-#define LIGHT_BOUNCE_NUM_MAX 8
+#define LIGHT_BOUNCE_NUM_MAX 16
 #define USE_ENVMAP true
 #define USE_DISTANT_LIGHT false
 
@@ -548,27 +548,6 @@ __device__ Vec3f renderKernel(
 			n = trinormal;
 			geometryType = GEO_TRIANGLE;
 		}
- 
-
-		#if 0
-		GroundPlane gp {0.0f};
-		hitDistance = gp.intersect(Ray(rayorig, raydir));
-		if (hitDistance < sceneT && hitDistance > RAY_MIN) {
-			sceneT = hitDistance;
-			n = gp.getNormal();
-			geometryType = GEO_GROUND;
-		}
-		#endif
-
-		#if 0
-		Sphere sphere {10.0f, Vec3f(0.0f, -15.0f, 0.0f)};
-		hitDistance = sphere.intersect(Ray(rayorig, raydir));
-		if (hitDistance < sceneT && hitDistance > RAY_MIN) {
-			sceneT = hitDistance;
-			n = sphere.getNormal(rayorig + raydir * sceneT);
-			geometryType = GEO_SPHERE;
-		}
-		#endif
 
 		// environmental sphere
 		if (sceneT > 1e10f) {
@@ -583,7 +562,6 @@ __device__ Vec3f renderKernel(
 		hitpoint = rayorig + raydir * sceneT;
 
 		// geometry type
-		if (geometryType == GEO_TRIANGLE)
 		{
 			// fetch textures
 			int originalIdx = tex1Dfetch(triIndicesTexture, hitTriAddr);
@@ -611,16 +589,6 @@ __device__ Vec3f renderKernel(
 
 			if (useTexture) { objcol = colorTex; } 
 			if (useNormal)  { n = smoothNormal; } 
-		}
-		else if (geometryType == GEO_GROUND) {
-			// ---------- material description ----------
-			refltype = MAT_DIFF;
-			Vec2f uv = Vec2f(hitpoint.x, hitpoint.z) * 0.25f;
-			float4 colorTex = tex2D(colorTexture, uv.x, uv.y);
-			objcol = Vec3f(colorTex.x, colorTex.y, colorTex.z);
-		}
-		else if (geometryType == GEO_SPHERE) {
-			refltype = MAT_DIFF;
 		}
 
 		// n is the geometry surface normal, nl always has opposite direction with raydir

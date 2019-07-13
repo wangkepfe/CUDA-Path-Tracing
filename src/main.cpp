@@ -673,12 +673,14 @@ int main(int argc, char **argv)
 {
 	// read scene desc
 	sceneDesc = loadSceneDesc("data/sceneDesc.json");
+	std::cout << "Read scene description file \"data/sceneDesc.json\" successfully\n";
 
 	// camera
 	hostRendercam = new Camera();
 	initCamera();
 	interactiveCamera->buildRenderCamera(hostRendercam);
 	interactiveCamera->loadFromFile(sceneDesc.camFile);
+	std::cout << "Load camera setting file successfully\n";
 
 	std::string BVHcacheFilename(sceneDesc.scenefile.c_str());
 	BVHcacheFilename += ".bvh";

@@ -2,16 +2,18 @@
     "scenefile"   : "data/TestObj.obj",
     "HDRmapname"  : "data/pisa.hdr",
     "textureFile" : "data/Checker.png",
-    "camFile"     : "data/myCamera.cam",
+    "camFile"     : "data/newCamSetting.cam",
     "matCount"    : 5,
     "matDesc" :
     {
         "InnerMat" :
         {
-            "refltype"    : "MAT_SUBSURFACE",
-            "alphax"      : 0.3,
-            "objcol"      : [0.9987,0.9986,0.9772],
-            "mfp"         : [0.0087,0.0084,0.0099]
+            "refltype"    : "MAT_FRESNEL",
+            "alphax"      : 0.1,
+            "alphay"      : 0.1,
+            "objcol"      : [1.0,1.0,1.0],
+            "kd"          : 5.0,
+            "ks"          : 1.0
         },
         "OuterMat" :
         {
@@ -28,7 +30,7 @@
         },
         "Material" :
         {
-            "refltype"    : "MAT_NULL"
+            "refltype"    : "MAT_REFL"
         }
     }
 }

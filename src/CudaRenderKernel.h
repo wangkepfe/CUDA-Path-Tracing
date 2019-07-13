@@ -10,8 +10,8 @@
 #include "bssrdfTable.h"
 #include "SceneDesc.h"
 
-#define scrwidth 720
-#define scrheight 720
+#define scrwidth 1920
+#define scrheight 1080
 
 void cudaRender(const float4* cudaNodes, const float4* cudaTriWoops, const float4* cudaDebugTris, const int* cudaTriInds, 
 	Vec3f* outputbuf, Vec3f* accumbuf, const cudaArray* HDRmap, const cudaArray* colorArray, const unsigned int framenumber, const unsigned int hashedframenumber, 
